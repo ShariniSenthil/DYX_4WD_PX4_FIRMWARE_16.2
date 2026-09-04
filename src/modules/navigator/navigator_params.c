@@ -61,13 +61,13 @@ PARAM_DEFINE_FLOAT(NAV_LOITER_RAD, 80.0f);
  * For fixed wing the npfg switch distance is used for horizontal acceptance.
  *
  * @unit m
- * @min 0.05
+ * @min 0.03
  * @max 200.0
- * @decimal 1
- * @increment 0.5
+ * @decimal 2
+ * @increment 0.01
  * @group Mission
  */
-PARAM_DEFINE_FLOAT(NAV_ACC_RAD, 10.0f);
+PARAM_DEFINE_FLOAT(NAV_ACC_RAD, 0.03f);
 
 /**
  * FW Altitude Acceptance Radius

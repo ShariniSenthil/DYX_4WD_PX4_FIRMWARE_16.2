@@ -1,6 +1,6 @@
 module_name: Roboclaw Driver
 serial_config:
-  - command: roboclaw start ${SERIAL_DEV} ${BAUD_PARAM}
+  - command: roboclaw start ${SERIAL_DEV} RBCLW_BAUD
     port_config_param:
       name: RBCLW_SER_CFG
       group: Roboclaw
@@ -19,6 +19,23 @@ actuator_output:
 parameters:
   - group: Roboclaw Driver
     definitions:
+      RBCLW_BAUD:
+        description:
+          short: RoboClaw packet serial baud rate
+          long: Baud rate selected for RoboClaw packet serial communication. This value must match the baud rate configured in BasicMicro Motion Studio.
+        type: enum
+        default: 115200
+        reboot_required: true
+        values:
+          2400: '2400'
+          9600: '9600'
+          19200: '19200'
+          38400: '38400'
+          57600: '57600'
+          115200: '115200'
+          230400: '230400'
+          460800: '460800'
+
       RBCLW_COUNTS_REV:
         description:
           short: Number of encoder counts for one wheel revolution

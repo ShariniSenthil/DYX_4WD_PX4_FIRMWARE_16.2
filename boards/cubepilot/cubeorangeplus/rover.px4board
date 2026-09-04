@@ -1,0 +1,24 @@
+# Rover-only overrides for Cube Orange Plus
+
+# Disable fixed-wing controllers
+# CONFIG_MODULES_FW_ATT_CONTROL is not set
+# CONFIG_MODULES_FW_AUTOTUNE_ATTITUDE_CONTROL is not set
+# CONFIG_MODULES_FW_POS_CONTROL is not set
+# CONFIG_MODULES_FW_RATE_CONTROL is not set
+
+# Disable multicopter controllers
+# CONFIG_MODULES_MC_ATT_CONTROL is not set
+# CONFIG_MODULES_MC_AUTOTUNE_ATTITUDE_CONTROL is not set
+# CONFIG_MODULES_MC_HOVER_THRUST_ESTIMATOR is not set
+# CONFIG_MODULES_MC_POS_CONTROL is not set
+# CONFIG_MODULES_MC_RATE_CONTROL is not set
+
+# Disable VTOL controller
+# CONFIG_MODULES_VTOL_ATT_CONTROL is not set
+
+# Enable differential rover
+CONFIG_MODULES_ROVER_DIFFERENTIAL=y
+
+# Rover uses its own control stack
+# CONFIG_MODULES_FLIGHT_MODE_MANAGER is not set
+CONFIG_DRIVERS_ROBOCLAW=y

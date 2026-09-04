@@ -66,9 +66,8 @@ int Roboclaw::initializeUART()
 	static constexpr int TIMEOUT_US = 11_ms;
 	_uart_fd_timeout = { .tv_sec = 0, .tv_usec = TIMEOUT_US };
 
-	int32_t baud_rate_parameter_value{0};
+	int32_t baud_rate_parameter_value = _param_rbclw_baud.get();
 	int32_t baud_rate_posix{0};
-	param_get(param_find(_stored_baud_rate_parameter), &baud_rate_parameter_value);
 
 	switch (baud_rate_parameter_value) {
 	case 0: // Auto
@@ -144,8 +143,9 @@ int Roboclaw::initializeUART()
 	uint8_t response_buffer[READ_STATUS_RESPONSE_SIZE];
 
 	if (receiveTransaction(Command::ReadStatus, response_buffer, READ_STATUS_RESPONSE_SIZE) < READ_STATUS_RESPONSE_SIZE) {
-		PX4_ERR("No valid response, stopping driver");
-		request_stop();
+		PX4_ERR("No valid response, retrying");
+		close(_uart_fd);
+		_uart_fd = -1;
 		return ERROR;
 
 	} else {
@@ -157,17 +157,30 @@ int Roboclaw::initializeUART()
 bool Roboclaw::updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
 			     unsigned num_outputs, unsigned num_control_groups_updated)
 {
-	float right_motor_output = ((float)outputs[0] - 128.0f) / 127.f;
-	float left_motor_output = ((float)outputs[1] - 128.0f) / 127.f;
+	vehicle_status_s vehicle_status{};
+
+	if (_vehicle_status_sub.copy(&vehicle_status)) {
+		if (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER) {
+			setMotorSpeed(Motor::Right, 0.f);
+			setMotorSpeed(Motor::Left, 0.f);
+			return true;
+		}
+	}
 
 	if (stop_motors) {
 		setMotorSpeed(Motor::Right, 0.f);
 		setMotorSpeed(Motor::Left, 0.f);
-
-	} else {
-		setMotorSpeed(Motor::Right, right_motor_output);
-		setMotorSpeed(Motor::Left, left_motor_output);
+		return true;
 	}
+
+	// Verified rover mapping:
+	// RBCLW_FUNC1 / outputs[0] = RIGHT motor
+	// RBCLW_FUNC2 / outputs[1] = LEFT motor
+	float right_motor_output = ((float)outputs[0] - 128.0f) / 127.f;
+	float left_motor_output = ((float)outputs[1] - 128.0f) / 127.f;
+
+	setMotorSpeed(Motor::Right, right_motor_output);
+	setMotorSpeed(Motor::Left, left_motor_output);
 
 	return true;
 }
@@ -181,12 +194,16 @@ void Roboclaw::Run()
 		return;
 	}
 
-	_mixing_output.update();
-
 	if (!_uart_initialized) {
-		initializeUART();
+		if (initializeUART() != OK) {
+			ScheduleDelayed(1_s);
+			return;
+		}
+
 		_uart_initialized = true;
 	}
+
+	_mixing_output.update();
 
 	// check for parameter updates
 	if (_parameter_update_sub.updated()) {
@@ -200,9 +217,8 @@ void Roboclaw::Run()
 	_actuator_armed_sub.update();
 	_mixing_output.updateSubscriptions(false);
 
-	if (readEncoder() != OK) {
-		PX4_ERR("Error reading encoders");
-	}
+	// Wheel encoders are not used on this rover.
+	// Do not poll RoboClaw encoder counters.
 }
 
 int Roboclaw::readEncoder()
