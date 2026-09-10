@@ -1,0 +1,77 @@
+name: Build Pixhawk 6X Differential Firmware
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build_v6x_differential:
+    name: Build px4_fmu-v6x_differential
+    runs-on: ubuntu-latest
+
+    container:
+      image: px4io/px4-dev-nuttx-focal:2022-08-12
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Show exact source revision
+        run: |
+          echo "Source commit:"
+          git rev-parse HEAD
+          git log -1 --oneline
+
+      - name: Build Holybro Pixhawk 6X differential firmware
+        run: |
+          make px4_fmu-v6x_differential
+
+      - name: Verify firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FW="$(find build/px4_fmu-v6x_differential \
+            -maxdepth 1 \
+            -type f \
+            -name '*.px4' \
+            -print \
+            -quit)"
+
+          if [ -z "$FW" ]; then
+            echo "ERROR: PX4 firmware file was not generated"
+            exit 1
+          fi
+
+          echo "Generated firmware:"
+          echo "$FW"
+
+          echo
+          echo "SHA256:"
+          sha256sum "$FW"
+
+          {
+            echo "target=px4_fmu-v6x_differential"
+            echo "source_commit=$(git rev-parse HEAD)"
+            echo "source_description=$(git log -1 --oneline)"
+            echo
+            echo "firmware_sha256:"
+            sha256sum "$FW"
+          } > BUILD_INFO.txt
+
+      - name: Upload CI firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: px4_fmu-v6x-differential-firmware
+          path: |
+            build/px4_fmu-v6x_differential/*.px4
+            BUILD_INFO.txt
+          if-no-files-found: error
+          retention-days: 30
