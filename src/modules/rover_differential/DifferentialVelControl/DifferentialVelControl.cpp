@@ -129,19 +129,26 @@ void DifferentialVelControl::generateVelocitySetpoint()
 		differential_velocity_setpoint.timestamp = _timestamp;
 
 		const float travel_speed = velocity_in_local_frame.norm();
+		constexpr float stationary_yaw_speed_threshold = 0.01f;
 
-		if (travel_speed < FLT_EPSILON) {
-			// P4 only:
-			// A zero velocity vector has no valid travel bearing. Retain
-			// the current rover yaw so a zero command cannot request a
-			// stale-bearing or North-facing pivot.
+		if (travel_speed < stationary_yaw_speed_threshold) {
+			// Absolute-yaw pivot extension:
+			// - zero velocity + finite yaw: pivot to the commanded yaw
+			// - zero velocity + yaw ignored/NAN: preserve P4 and hold current yaw
 			differential_velocity_setpoint.speed = 0.f;
-			differential_velocity_setpoint.bearing = _vehicle_yaw;
+
+			if (PX4_ISFINITE(trajectory_setpoint.yaw)) {
+				differential_velocity_setpoint.bearing = matrix::wrap_pi(trajectory_setpoint.yaw);
+
+			} else {
+				differential_velocity_setpoint.bearing = _vehicle_yaw;
+			}
 
 		} else {
-			// Default PX4 v1.16.2 behavior for every nonzero vector.
+			// Preserve the existing velocity-vector steering contract while moving.
 			differential_velocity_setpoint.speed = travel_speed;
-			differential_velocity_setpoint.bearing = atan2f(velocity_in_local_frame(1), velocity_in_local_frame(0));
+			differential_velocity_setpoint.bearing =
+				atan2f(velocity_in_local_frame(1), velocity_in_local_frame(0));
 		}
 
 		_differential_velocity_setpoint_pub.publish(differential_velocity_setpoint);
