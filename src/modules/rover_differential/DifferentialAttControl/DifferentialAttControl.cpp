@@ -177,13 +177,31 @@ void DifferentialAttControl::generateRateSetpoint()
 		return;
 	}
 
-	const float yaw_rate_setpoint = RoverControl::attitudeControl(_adjusted_yaw_setpoint, _pid_yaw, _max_yaw_rate,
+	// RO_YAW_RATE_LIM remains the FCU hard safety ceiling.
+	// With an OFFBOARD absolute-yaw command, a finite yawspeed is used as
+	// the requested turn-speed limit. Turn direction still comes from the
+	// signed yaw error to the absolute yaw target.
+	float commanded_yaw_rate_limit = _max_yaw_rate;
+
+	if (_vehicle_control_mode.flag_control_offboard_enabled) {
+		trajectory_setpoint_s trajectory_setpoint{};
+		_trajectory_setpoint_sub.copy(&trajectory_setpoint);
+
+		if (PX4_ISFINITE(trajectory_setpoint.yaw) && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
+			commanded_yaw_rate_limit =
+				math::constrain(fabsf(trajectory_setpoint.yawspeed), 0.f, _max_yaw_rate);
+		}
+	}
+
+	const float yaw_rate_setpoint = RoverControl::attitudeControl(_adjusted_yaw_setpoint, _pid_yaw,
+					commanded_yaw_rate_limit,
 					_vehicle_yaw, _rover_attitude_setpoint.yaw_setpoint, _dt);
 
 	_last_rate_setpoint_update = _timestamp;
 	rover_rate_setpoint_s rover_rate_setpoint{};
 	rover_rate_setpoint.timestamp = _timestamp;
-	rover_rate_setpoint.yaw_rate_setpoint = math::constrain(yaw_rate_setpoint, -_max_yaw_rate, _max_yaw_rate);
+	rover_rate_setpoint.yaw_rate_setpoint =
+		math::constrain(yaw_rate_setpoint, -commanded_yaw_rate_limit, commanded_yaw_rate_limit);
 	_rover_rate_setpoint_pub.publish(rover_rate_setpoint);
 }
 
