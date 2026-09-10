@@ -132,23 +132,25 @@ void DifferentialVelControl::generateVelocitySetpoint()
 		constexpr float stationary_yaw_speed_threshold = 0.01f;
 
 		if (travel_speed < stationary_yaw_speed_threshold) {
-			// Absolute-yaw pivot extension:
-			// - zero velocity + finite yaw: pivot to the commanded yaw
-			// - zero velocity + yaw ignored/NAN: preserve P4 and hold current yaw
 			differential_velocity_setpoint.speed = 0.f;
-
-			if (PX4_ISFINITE(trajectory_setpoint.yaw)) {
-				differential_velocity_setpoint.bearing = matrix::wrap_pi(trajectory_setpoint.yaw);
-
-			} else {
-				differential_velocity_setpoint.bearing = _vehicle_yaw;
-			}
-
 		} else {
-			// Preserve the existing velocity-vector steering contract while moving.
 			differential_velocity_setpoint.speed = travel_speed;
+		}
+
+		if (PX4_ISFINITE(trajectory_setpoint.yaw)) {
+			// Explicit offboard yaw has steering authority at any speed:
+			// - stationary: absolute-yaw differential pivot
+			// - moving: speed comes from velocity magnitude, bearing comes from yaw
+			differential_velocity_setpoint.bearing = matrix::wrap_pi(trajectory_setpoint.yaw);
+
+		} else if (travel_speed >= stationary_yaw_speed_threshold) {
+			// Backward-compatible velocity-vector steering when yaw is ignored.
 			differential_velocity_setpoint.bearing =
 				atan2f(velocity_in_local_frame(1), velocity_in_local_frame(0));
+
+		} else {
+			// Normal zero-velocity stop with yaw ignored: hold current heading.
+			differential_velocity_setpoint.bearing = _vehicle_yaw;
 		}
 
 		_differential_velocity_setpoint_pub.publish(differential_velocity_setpoint);
