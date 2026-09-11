@@ -198,11 +198,18 @@ void DifferentialRateControl::generateSteeringSetpoint()
 				&& _timestamp >= trajectory_setpoint.timestamp
 				&& (_timestamp - trajectory_setpoint.timestamp) < 500_ms;
 
+			// NaN yawspeed means use the normal FCU pivot-rate limit.
+			// Finite nonzero yawspeed is the optional OFFBOARD pivot-rate override.
+			// Finite zero explicitly pauses the pivot and must not receive breakaway torque.
+			const bool pivot_rate_allows_motion =
+				!PX4_ISFINITE(trajectory_setpoint.yawspeed)
+				|| fabsf(trajectory_setpoint.yawspeed) > FLT_EPSILON;
+
 			const bool stationary_explicit_yaw_pivot =
 				stationary
 				&& trajectory_setpoint_fresh
 				&& PX4_ISFINITE(trajectory_setpoint.yaw)
-				&& !PX4_ISFINITE(trajectory_setpoint.yawspeed);
+				&& pivot_rate_allows_motion;
 
 			if (stationary_explicit_yaw_pivot
 			    && fabsf(speed_diff_normalized) > FLT_EPSILON
@@ -212,8 +219,7 @@ void DifferentialRateControl::generateSteeringSetpoint()
 					min_pivot_diff,
 					_rover_rate_setpoint.yaw_rate_setpoint);
 			}
-	}
-
+		}
 	}
 
 	rover_steering_setpoint_s rover_steering_setpoint{};
