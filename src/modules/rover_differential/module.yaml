@@ -32,6 +32,22 @@ parameters:
         decimal: 2
         default: 0
 
+      RD_PIVOT_MIN_DIF:
+        description:
+          short: Minimum stationary pivot motor differential
+          long: |
+            Minimum normalized left/right motor speed difference applied only
+            during a fresh stationary OFFBOARD velocity-mode pivot with a
+            finite absolute yaw target and ignored yaw-rate command.
+            This compensates drivetrain static friction near the target yaw.
+            Set to 0 to disable and retain the normal yaw-rate controller output.
+        type: float
+        min: 0.0
+        max: 1.0
+        increment: 0.01
+        decimal: 2
+        default: 0.0
+
       RD_TRANS_TRN_DRV:
         description:
             short: Yaw error threshhold to switch from spot turning to driving
