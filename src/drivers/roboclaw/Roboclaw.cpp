@@ -43,6 +43,7 @@
 
 #include "Roboclaw.hpp"
 #include <termios.h>
+#include <math.h>
 
 Roboclaw::Roboclaw(const char *device_name, const char *bad_rate_parameter) :
 	OutputModuleInterface(MODULE_NAME, px4::wq_configurations::hp_default)
@@ -217,14 +218,38 @@ void Roboclaw::Run()
 	_actuator_armed_sub.update();
 	_mixing_output.updateSubscriptions(false);
 
-	// Wheel encoders are not used on this rover.
-	// Do not poll RoboClaw encoder counters.
+	// Rear encoders represent the right/left side speeds of the 4WD rover.
+	// Rate-limit serial polling so encoder telemetry cannot monopolize the
+	// RoboClaw UART/work queue. 0 Hz keeps polling disabled.
+	const int32_t encoder_rate_hz = _param_rbclw_enc_hz.get();
+
+	if (encoder_rate_hz > 0) {
+		const hrt_abstime now = hrt_absolute_time();
+		const uint32_t rate_hz = static_cast<uint32_t>(math::constrain(encoder_rate_hz, int32_t{1}, int32_t{100}));
+		const uint64_t interval_us = 1000000ULL / rate_hz;
+
+		if ((_last_encoder_read == 0) || (now - _last_encoder_read >= interval_us)) {
+			_last_encoder_read = now;
+
+			if (readEncoder() != OK) {
+				if ((_last_encoder_warn == 0) || (now - _last_encoder_warn > 1000000ULL)) {
+					PX4_WARN("Rear encoder read failed");
+					_last_encoder_warn = now;
+				}
+			}
+		}
+	}
 }
 
 int Roboclaw::readEncoder()
 {
 	static constexpr int ENCODER_MESSAGE_SIZE = 10; // response size for ReadEncoderCounters
 	static constexpr int ENCODER_SPEED_MESSAGE_SIZE = 7; // response size for CMD_READ_SPEED_{1,2}
+
+	// Stamp before the three UART transactions. A late/stalled response must not
+	// be published as if it were a fresh encoder measurement. EKF2_WENC_DELAY
+	// handles the remaining approximately constant transport delay.
+	const uint64_t measurement_time = hrt_absolute_time();
 
 	uint8_t buffer_positon[ENCODER_MESSAGE_SIZE];
 	uint8_t buffer_speed_right[ENCODER_SPEED_MESSAGE_SIZE];
@@ -254,7 +279,7 @@ int Roboclaw::readEncoder()
 	wheel_encoders.wheel_speed[1] = static_cast<float>(speed_left) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
 	wheel_encoders.wheel_angle[0] = static_cast<float>(position_right) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
 	wheel_encoders.wheel_angle[1] = static_cast<float>(position_left) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.timestamp = hrt_absolute_time();
+	wheel_encoders.timestamp = measurement_time;
 	_wheel_encoders_pub.publish(wheel_encoders);
 
 	return OK;
@@ -262,24 +287,39 @@ int Roboclaw::readEncoder()
 
 void Roboclaw::setMotorSpeed(Motor motor, float value)
 {
+	value = math::constrain(value, -1.f, 1.f);
+
+	// Avoid commanding a real QPPS target for mixer quantization around zero.
+	if (fabsf(value) < 0.01f) {
+		value = 0.f;
+	}
+
+	if (_param_rbclw_vel_ctrl.get() != 0) {
+		// Closed-loop side velocity control inside RoboClaw. The rear encoder on
+		// each side is the feedback sensor for the complete front+rear motor pair.
+		const int32_t qpps_max = math::max(_param_rbclw_qpps_max.get(), int32_t{0});
+		const int32_t qpps = (qpps_max > 0)
+				     ? static_cast<int32_t>(value * static_cast<float>(qpps_max))
+				     : 0;
+
+		if (motor == Motor::Right) {
+			sendSigned32Bit(Command::DriveSpeedMotor1, qpps);
+
+		} else if (motor == Motor::Left) {
+			sendSigned32Bit(Command::DriveSpeedMotor2, qpps);
+		}
+
+		return;
+	}
+
+	// Legacy open-loop path retained for instant rollback with RBCLW_VEL_CTRL=0.
 	Command command;
 
-	// send command
 	if (motor == Motor::Right) {
-		if (value > 0) {
-			command = Command::DriveForwardMotor1;
-
-		} else {
-			command = Command::DriveBackwardsMotor1;
-		}
+		command = value > 0.f ? Command::DriveForwardMotor1 : Command::DriveBackwardsMotor1;
 
 	} else if (motor == Motor::Left) {
-		if (value > 0) {
-			command = Command::DriveForwardMotor2;
-
-		} else {
-			command = Command::DriveBackwardsMotor2;
-		}
+		command = value > 0.f ? Command::DriveForwardMotor2 : Command::DriveBackwardsMotor2;
 
 	} else {
 		return;
@@ -330,6 +370,16 @@ void Roboclaw::sendSigned16Bit(Command command, float data)
 	buff[0] = (value >> 8) & 0xFF; // High byte
 	buff[1] = value & 0xFF; // Low byte
 	sendTransaction(command, (uint8_t *) &buff, 2);
+}
+
+void Roboclaw::sendSigned32Bit(Command command, int32_t value)
+{
+	uint8_t buff[4];
+	buff[0] = (value >> 24) & 0xFF;
+	buff[1] = (value >> 16) & 0xFF;
+	buff[2] = (value >> 8) & 0xFF;
+	buff[3] = value & 0xFF;
+	sendTransaction(command, buff, sizeof(buff));
 }
 
 int Roboclaw::sendTransaction(Command cmd, uint8_t *write_buffer, size_t bytes_to_write)
