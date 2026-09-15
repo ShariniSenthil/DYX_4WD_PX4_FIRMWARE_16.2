@@ -200,6 +200,7 @@ void LoggedTopics::add_default_topics()
 	add_optional_topic_multi("vehicle_magnetometer", 500, 4);
 	add_topic("vehicle_optical_flow", 500);
 	add_topic("aux_global_position", 500);
+	add_topic("wheel_encoders", 50);
 	//add_optional_topic("vehicle_optical_flow_vel", 100);
 	add_optional_topic("pps_capture");
 
@@ -309,6 +310,7 @@ void LoggedTopics::add_estimator_replay_topics()
 	add_topic("vehicle_status");
 	add_topic("vehicle_visual_odometry");
 	add_topic("aux_global_position");
+	add_topic("wheel_encoders");
 	add_topic_multi("distance_sensor");
 }
 

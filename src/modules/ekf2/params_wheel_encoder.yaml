@@ -1,0 +1,105 @@
+module_name: ekf2
+parameters:
+- group: EKF2
+  definitions:
+    EKF2_WENC_CTRL:
+      description:
+        short: Rear wheel encoder fusion enable
+        long: |
+          Enable fusion of rear-encoder body-frame velocity for the 4WD rover.
+          The source is secondary only; GNSS/RTK remains the global position
+          authority. Requires EKF2_WENC_RAD > 0 and wheel_encoders data.
+      type: int32
+      default: 0
+      min: 0
+      max: 1
+
+    EKF2_WENC_RAD:
+      description:
+        short: Rear wheel effective rolling radius
+        long: |
+          Effective rolling radius used to convert the two rear encoder speeds
+          from rad/s to rover forward velocity. Calibrate using measured travel.
+      type: float
+      default: 0.0
+      min: 0.0
+      max: 1.0
+      unit: m
+      decimal: 4
+
+    EKF2_WENC_DELAY:
+      description:
+        short: Rear encoder measurement delay relative to IMU
+      type: float
+      default: 0.0
+      min: 0
+      max: 300
+      unit: ms
+      decimal: 1
+
+    EKF2_WENC_NOISE:
+      description:
+        short: Rear encoder forward velocity noise
+        long: |
+          1-sigma observation noise for body-X velocity. Start conservatively
+          on a skid-steer rover and reduce only after checking innovations.
+      type: float
+      default: 0.20
+      min: 0.01
+      max: 5.0
+      unit: m/s
+      decimal: 2
+
+    EKF2_WENC_LAT_N:
+      description:
+        short: Rear encoder lateral constraint noise
+        long: |
+          1-sigma noise for the body-Y approximately-zero velocity constraint.
+          Four-wheel skid-steer pivots have real tire scrub, so the default is
+          deliberately weaker than a caster rover.
+      type: float
+      default: 0.50
+      min: 0.01
+      max: 10.0
+      unit: m/s
+      decimal: 2
+
+    EKF2_WENC_GATE:
+      description:
+        short: Rear encoder velocity innovation gate
+      type: float
+      default: 5.0
+      min: 1.0
+      max: 20.0
+      unit: SD
+      decimal: 1
+
+    EKF2_WENC_POS_X:
+      description:
+        short: Rear encoder axle midpoint X position
+        long: |
+          X position of the midpoint between the rear left/right encoder wheels
+          relative to the vehicle body origin. Forward is positive. A rear axle
+          behind the body origin therefore has a negative value.
+      type: float
+      default: 0.0
+      unit: m
+      decimal: 3
+
+    EKF2_WENC_POS_Y:
+      description:
+        short: Rear encoder axle midpoint Y position
+        long: Right is positive in the PX4 body frame. Normally near zero.
+      type: float
+      default: 0.0
+      unit: m
+      decimal: 3
+
+    EKF2_WENC_POS_Z:
+      description:
+        short: Rear encoder axle midpoint Z position
+        long: Down is positive in the PX4 body frame.
+      type: float
+      default: 0.0
+      unit: m
+      decimal: 3
