@@ -43,6 +43,46 @@ parameters:
         type: int32
         default: 1200
         min: 1
+      RBCLW_VEL_CTRL:
+        description:
+          short: Rear-encoder side velocity control
+          long: |
+            0 keeps the existing open-loop RoboClaw command path.
+            1 uses RoboClaw signed-speed closed-loop control. The rear-right
+            encoder regulates the complete right-side motor pair and the
+            rear-left encoder regulates the complete left-side motor pair.
+            This assumes each RoboClaw channel powers the front and rear motor
+            on the same side. It is not independent four-wheel traction control.
+        type: int32
+        default: 0
+        min: 0
+        max: 1
+
+      RBCLW_QPPS_MAX:
+        description:
+          short: Full-command side speed in encoder counts per second
+          long: |
+            Maps normalized PX4 side command [-1, 1] to the RoboClaw signed
+            speed target. Calibrate this using the rear wheel encoder and
+            BasicMicro Motion Studio. A value of 0 forces stop when
+            RBCLW_VEL_CTRL is enabled.
+        type: int32
+        default: 0
+        min: 0
+        max: 2000000
+
+      RBCLW_ENC_HZ:
+        description:
+          short: Rear encoder polling and publication rate
+          long: |
+            Polls the two RoboClaw encoder channels and publishes wheel_encoders.
+            0 disables polling. Start with 20 Hz for EKF2/tuning and increase
+            only after checking serial load.
+        type: int32
+        default: 0
+        min: 0
+        max: 100
+
       RBCLW_ADDRESS:
         description:
           short: Address of the ESC on the bus

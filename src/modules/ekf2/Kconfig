@@ -45,6 +45,15 @@ depends on MODULES_EKF2
 	---help---
 		EKF2 auxiliary velocity fusion support.
 
+menuconfig EKF2_WHEEL_ENCODER
+depends on MODULES_EKF2
+depends on EKF2_EXTERNAL_VISION
+	bool "wheel encoder velocity fusion support"
+	default n
+	---help---
+		Fuse rear-wheel encoder velocity as a secondary body-frame velocity aid
+		for differential/skid-steer ground rovers.
+
 menuconfig EKF2_BAROMETER
 depends on MODULES_EKF2
 	bool "barometer support"

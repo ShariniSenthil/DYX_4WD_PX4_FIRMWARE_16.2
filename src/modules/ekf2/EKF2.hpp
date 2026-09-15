@@ -97,6 +97,10 @@
 # include <uORB/topics/landing_target_pose.h>
 #endif // CONFIG_EKF2_AUXVEL
 
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+# include <uORB/topics/wheel_encoders.h>
+#endif // CONFIG_EKF2_WHEEL_ENCODER
+
 #if defined(CONFIG_EKF2_BAROMETER)
 # include <uORB/topics/vehicle_air_data.h>
 #endif // CONFIG_EKF2_BAROMETER
@@ -204,6 +208,9 @@ private:
 #if defined(CONFIG_EKF2_AUXVEL)
 	void UpdateAuxVelSample(ekf2_timestamps_s &ekf2_timestamps);
 #endif // CONFIG_EKF2_AUXVEL
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	void UpdateWheelEncoderSample(ekf2_timestamps_s &ekf2_timestamps);
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 #if defined(CONFIG_EKF2_BAROMETER)
 	void UpdateBaroSample(ekf2_timestamps_s &ekf2_timestamps);
 #endif // CONFIG_EKF2_BAROMETER
@@ -337,6 +344,12 @@ private:
 	uORB::PublicationMulti<estimator_aid_source2d_s> _estimator_aid_src_aux_vel_pub{ORB_ID(estimator_aid_src_aux_vel)};
 	hrt_abstime _status_aux_vel_pub_last{0};
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	uORB::Subscription _wheel_encoders_sub {ORB_ID(wheel_encoders)};
+	uORB::PublicationMulti<estimator_aid_source3d_s> _estimator_aid_src_wheel_encoder_pub{ORB_ID(estimator_aid_src_wheel_encoder)};
+	hrt_abstime _status_wheel_encoder_pub_last{0};
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 #if defined(CONFIG_EKF2_OPTICAL_FLOW)
 	uORB::Subscription _vehicle_optical_flow_sub {ORB_ID(vehicle_optical_flow)};
@@ -493,6 +506,18 @@ private:
 		(ParamExtFloat<px4::params::EKF2_AVEL_DELAY>)
 		_param_ekf2_avel_delay,	///< auxiliary velocity measurement delay relative to the IMU (mSec)
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+		(ParamExtInt<px4::params::EKF2_WENC_CTRL>) _param_ekf2_wenc_ctrl,
+		(ParamExtFloat<px4::params::EKF2_WENC_RAD>) _param_ekf2_wenc_rad,
+		(ParamExtFloat<px4::params::EKF2_WENC_DELAY>) _param_ekf2_wenc_delay,
+		(ParamExtFloat<px4::params::EKF2_WENC_NOISE>) _param_ekf2_wenc_noise,
+		(ParamExtFloat<px4::params::EKF2_WENC_LAT_N>) _param_ekf2_wenc_lat_n,
+		(ParamExtFloat<px4::params::EKF2_WENC_GATE>) _param_ekf2_wenc_gate,
+		(ParamExtFloat<px4::params::EKF2_WENC_POS_X>) _param_ekf2_wenc_pos_x,
+		(ParamExtFloat<px4::params::EKF2_WENC_POS_Y>) _param_ekf2_wenc_pos_y,
+		(ParamExtFloat<px4::params::EKF2_WENC_POS_Z>) _param_ekf2_wenc_pos_z,
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 		(ParamExtFloat<px4::params::EKF2_GYR_NOISE>)
 		_param_ekf2_gyr_noise,	///< IMU angular rate noise used for covariance prediction (rad/sec)

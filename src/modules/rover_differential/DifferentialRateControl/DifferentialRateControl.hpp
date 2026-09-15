@@ -133,6 +133,7 @@ private:
 	DEFINE_PARAMETERS(
 		(ParamFloat<px4::params::RD_WHEEL_TRACK>)   _param_rd_wheel_track,
 		(ParamFloat<px4::params::RD_MAX_THR_YAW_R>) _param_rd_max_thr_yaw_r,
+		(ParamFloat<px4::params::RD_PIVOT_MIN_DIF>) _param_rd_pivot_min_dif,
 		(ParamFloat<px4::params::RO_YAW_RATE_LIM>)  _param_ro_yaw_rate_limit,
 		(ParamFloat<px4::params::RO_YAW_RATE_TH>)   _param_ro_yaw_rate_th,
 		(ParamFloat<px4::params::RO_YAW_RATE_P>)    _param_ro_yaw_rate_p,
