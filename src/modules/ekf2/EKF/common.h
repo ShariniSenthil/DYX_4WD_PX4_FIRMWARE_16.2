@@ -515,8 +515,8 @@ struct parameters {
 	float wenc_rad{0.0f};
 	float wenc_delay_ms{0.0f};
 	float wenc_noise{0.20f};
-	float wenc_lat_noise{0.50f};
 	float wenc_gate{5.0f};
+	float wenc_timeout_ms{500.0f};
 	Vector3f wenc_pos_body{};               ///< rear encoder axle midpoint in body frame (m)
 #endif // CONFIG_EKF2_WHEEL_ENCODER
 

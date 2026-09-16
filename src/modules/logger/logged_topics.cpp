@@ -200,7 +200,11 @@ void LoggedTopics::add_default_topics()
 	add_optional_topic_multi("vehicle_magnetometer", 500, 4);
 	add_topic("vehicle_optical_flow", 500);
 	add_topic("aux_global_position", 500);
+
+	// 4WD rear-wheel encoder + EKF2 wheel-aid diagnostics at 20 Hz.
 	add_topic("wheel_encoders", 50);
+	add_optional_topic_multi("estimator_aid_src_wheel_encoder", 50);
+
 	//add_optional_topic("vehicle_optical_flow_vel", 100);
 	add_optional_topic("pps_capture");
 

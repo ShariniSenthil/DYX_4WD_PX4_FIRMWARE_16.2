@@ -347,7 +347,7 @@ private:
 
 #if defined(CONFIG_EKF2_WHEEL_ENCODER)
 	uORB::Subscription _wheel_encoders_sub {ORB_ID(wheel_encoders)};
-	uORB::PublicationMulti<estimator_aid_source3d_s> _estimator_aid_src_wheel_encoder_pub{ORB_ID(estimator_aid_src_wheel_encoder)};
+	uORB::PublicationMulti<estimator_aid_source1d_s> _estimator_aid_src_wheel_encoder_pub{ORB_ID(estimator_aid_src_wheel_encoder)};
 	hrt_abstime _status_wheel_encoder_pub_last{0};
 #endif // CONFIG_EKF2_WHEEL_ENCODER
 
@@ -512,8 +512,8 @@ private:
 		(ParamExtFloat<px4::params::EKF2_WENC_RAD>) _param_ekf2_wenc_rad,
 		(ParamExtFloat<px4::params::EKF2_WENC_DELAY>) _param_ekf2_wenc_delay,
 		(ParamExtFloat<px4::params::EKF2_WENC_NOISE>) _param_ekf2_wenc_noise,
-		(ParamExtFloat<px4::params::EKF2_WENC_LAT_N>) _param_ekf2_wenc_lat_n,
 		(ParamExtFloat<px4::params::EKF2_WENC_GATE>) _param_ekf2_wenc_gate,
+		(ParamExtFloat<px4::params::EKF2_WENC_TOUT>) _param_ekf2_wenc_tout,
 		(ParamExtFloat<px4::params::EKF2_WENC_POS_X>) _param_ekf2_wenc_pos_x,
 		(ParamExtFloat<px4::params::EKF2_WENC_POS_Y>) _param_ekf2_wenc_pos_y,
 		(ParamExtFloat<px4::params::EKF2_WENC_POS_Z>) _param_ekf2_wenc_pos_z,
@@ -546,6 +546,10 @@ private:
 
 		(ParamExtFloat<px4::params::EKF2_GPS_V_NOISE>) _param_ekf2_gps_v_noise,
 		(ParamExtFloat<px4::params::EKF2_GPS_P_NOISE>) _param_ekf2_gps_p_noise,
+
+#if defined(CONFIG_EKF2_GNSS_YAW)
+		(ParamExtFloat<px4::params::EKF2_GPS_YAW_N>) _param_ekf2_gps_yaw_n,
+#endif // CONFIG_EKF2_GNSS_YAW
 
 		(ParamExtFloat<px4::params::EKF2_GPS_P_GATE>) _param_ekf2_gps_p_gate,
 		(ParamExtFloat<px4::params::EKF2_GPS_V_GATE>) _param_ekf2_gps_v_gate,

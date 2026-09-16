@@ -41,26 +41,13 @@ parameters:
       description:
         short: Rear encoder forward velocity noise
         long: |
-          1-sigma observation noise for body-X velocity. Start conservatively
-          on a skid-steer rover and reduce only after checking innovations.
+          1-sigma observation noise for the scalar body-X wheel velocity.
+          Start conservatively on a skid-steer rover and reduce only after
+          checking wheel innovations against RTK/GNSS velocity.
       type: float
       default: 0.20
       min: 0.01
       max: 5.0
-      unit: m/s
-      decimal: 2
-
-    EKF2_WENC_LAT_N:
-      description:
-        short: Rear encoder lateral constraint noise
-        long: |
-          1-sigma noise for the body-Y approximately-zero velocity constraint.
-          Four-wheel skid-steer pivots have real tire scrub, so the default is
-          deliberately weaker than a caster rover.
-      type: float
-      default: 0.50
-      min: 0.01
-      max: 10.0
       unit: m/s
       decimal: 2
 
@@ -73,6 +60,21 @@ parameters:
       max: 20.0
       unit: SD
       decimal: 1
+
+    EKF2_WENC_TOUT:
+      description:
+        short: Rear encoder fusion timeout
+        long: |
+          Maximum time without a successful wheel-velocity fusion before
+          wheel aiding is marked inactive. Timeout stops wheel aiding only;
+          it does not reset position, velocity, yaw, or GNSS aiding. Fresh
+          valid wheel data can resume fusion automatically.
+      type: float
+      default: 500
+      min: 100
+      max: 5000
+      unit: ms
+      decimal: 0
 
     EKF2_WENC_POS_X:
       description:

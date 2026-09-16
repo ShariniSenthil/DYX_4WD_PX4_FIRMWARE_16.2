@@ -123,6 +123,14 @@ int Roboclaw::initializeUART()
 	uart_config.c_oflag &= ~ONLCR; // no CR for every LF
 	uart_config.c_cflag &= ~CRTSCTS;
 
+	// RoboClaw Packet Serial is a binary protocol. Disable terminal-layer
+	// translations, canonical processing, echo and software flow control.
+	uart_config.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+	uart_config.c_oflag &= ~OPOST;
+	uart_config.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+	uart_config.c_cflag &= ~(CSIZE | PARENB);
+	uart_config.c_cflag |= CS8;
+
 	// Set baud rate
 	ret = cfsetispeed(&uart_config, baud_rate_posix);
 
@@ -246,14 +254,22 @@ int Roboclaw::readEncoder()
 	static constexpr int ENCODER_MESSAGE_SIZE = 10; // response size for ReadEncoderCounters
 	static constexpr int ENCODER_SPEED_MESSAGE_SIZE = 7; // response size for CMD_READ_SPEED_{1,2}
 
-	// Stamp before the three UART transactions. A late/stalled response must not
-	// be published as if it were a fresh encoder measurement. EKF2_WENC_DELAY
-	// handles the remaining approximately constant transport delay.
-	const uint64_t measurement_time = hrt_absolute_time();
+	// Conversion cannot be valid with an unset/invalid counts-per-revolution value.
+	// Return ERROR and let the existing throttled driver warning report the failure.
+	const int32_t counts_rev = _param_rbclw_counts_rev.get();
+
+	if (counts_rev <= 0) {
+		return ERROR;
+	}
 
 	uint8_t buffer_positon[ENCODER_MESSAGE_SIZE];
 	uint8_t buffer_speed_right[ENCODER_SPEED_MESSAGE_SIZE];
 	uint8_t buffer_speed_left[ENCODER_SPEED_MESSAGE_SIZE];
+
+	// Commands 18 and 19 are sequential. Use the midpoint of the two speed
+	// transactions as the representative observation time. EKF2_WENC_DELAY
+	// remains available for any repeatable residual transport/filter delay.
+	const uint64_t speed_poll_start = hrt_absolute_time();
 
 	if (receiveTransaction(Command::ReadSpeedMotor1, buffer_speed_right,
 			       ENCODER_SPEED_MESSAGE_SIZE) < ENCODER_SPEED_MESSAGE_SIZE) {
@@ -265,6 +281,9 @@ int Roboclaw::readEncoder()
 		return ERROR;
 	}
 
+	const uint64_t speed_poll_end = hrt_absolute_time();
+	const uint64_t measurement_time = speed_poll_start + ((speed_poll_end - speed_poll_start) / 2);
+
 	if (receiveTransaction(Command::ReadEncoderCounters, buffer_positon, ENCODER_MESSAGE_SIZE) < ENCODER_MESSAGE_SIZE) {
 		return ERROR;
 	}
@@ -274,11 +293,13 @@ int Roboclaw::readEncoder()
 	int32_t position_right = swapBytesInt32(&buffer_positon[0]);
 	int32_t position_left = swapBytesInt32(&buffer_positon[4]);
 
+	const float counts_rev_f = static_cast<float>(counts_rev);
+
 	wheel_encoders_s wheel_encoders{};
-	wheel_encoders.wheel_speed[0] = static_cast<float>(speed_right) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.wheel_speed[1] = static_cast<float>(speed_left) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.wheel_angle[0] = static_cast<float>(position_right) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.wheel_angle[1] = static_cast<float>(position_left) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
+	wheel_encoders.wheel_speed[0] = static_cast<float>(speed_right) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_speed[1] = static_cast<float>(speed_left) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_angle[0] = static_cast<float>(position_right) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_angle[1] = static_cast<float>(position_left) / counts_rev_f * M_TWOPI_F;
 	wheel_encoders.timestamp = measurement_time;
 	_wheel_encoders_pub.publish(wheel_encoders);
 
@@ -424,7 +445,12 @@ int Roboclaw::writeCommandWithPayload(Command command, uint8_t *wbuff, size_t by
 
 int Roboclaw::readAcknowledgement()
 {
-	int select_status = select(_uart_fd + 1, &_uart_fd_set, nullptr, nullptr, &_uart_fd_timeout);
+	fd_set read_fds;
+	FD_ZERO(&read_fds);
+	FD_SET(_uart_fd, &read_fds);
+	struct timeval timeout = _uart_fd_timeout;
+
+	int select_status = select(_uart_fd + 1, &read_fds, nullptr, nullptr, &timeout);
 
 	if (select_status <= 0) {
 		PX4_ERR("ACK timeout");
@@ -474,7 +500,12 @@ int Roboclaw::readResponse(Command command, uint8_t *read_buffer, size_t bytes_t
 	size_t total_bytes_read = 0;
 
 	while (total_bytes_read < bytes_to_read) {
-		int select_status = select(_uart_fd + 1, &_uart_fd_set, nullptr, nullptr, &_uart_fd_timeout);
+		fd_set read_fds;
+		FD_ZERO(&read_fds);
+		FD_SET(_uart_fd, &read_fds);
+		struct timeval timeout = _uart_fd_timeout;
+
+		int select_status = select(_uart_fd + 1, &read_fds, nullptr, nullptr, &timeout);
 
 		if (select_status <= 0) {
 			PX4_ERR("Select timeout %d\n", select_status);

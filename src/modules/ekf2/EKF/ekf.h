@@ -595,7 +595,8 @@ private:
 #endif // CONFIG_EKF2_AUXVEL
 
 #if defined(CONFIG_EKF2_WHEEL_ENCODER)
-	estimator_aid_source3d_s _aid_src_wheel_encoder {};
+	estimator_aid_source1d_s _aid_src_wheel_encoder {};
+	bool _wheel_encoder_fusion_active{false};
 #endif // CONFIG_EKF2_WHEEL_ENCODER
 
 	// Variables used by the initial filter alignment
@@ -967,6 +968,7 @@ private:
 
 #if defined(CONFIG_EKF2_WHEEL_ENCODER)
 	void controlWheelEncoderFusion(const imuSample &imu_sample);
+	void stopWheelEncoderFusion();
 #endif // CONFIG_EKF2_WHEEL_ENCODER
 
 	void checkVerticalAccelerationHealth(const imuSample &imu_delayed);

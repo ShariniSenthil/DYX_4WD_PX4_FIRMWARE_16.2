@@ -75,8 +75,8 @@ EKF2::EKF2(bool multi_mode, const px4::wq_config_t &config, bool replay_mode):
 	_param_ekf2_wenc_rad(_params->wenc_rad),
 	_param_ekf2_wenc_delay(_params->wenc_delay_ms),
 	_param_ekf2_wenc_noise(_params->wenc_noise),
-	_param_ekf2_wenc_lat_n(_params->wenc_lat_noise),
 	_param_ekf2_wenc_gate(_params->wenc_gate),
+	_param_ekf2_wenc_tout(_params->wenc_timeout_ms),
 	_param_ekf2_wenc_pos_x(_params->wenc_pos_body(0)),
 	_param_ekf2_wenc_pos_y(_params->wenc_pos_body(1)),
 	_param_ekf2_wenc_pos_z(_params->wenc_pos_body(2)),
@@ -97,6 +97,9 @@ EKF2::EKF2(bool multi_mode, const px4::wq_config_t &config, bool replay_mode):
 	_param_ekf2_gps_pos_z(_params->gps_pos_body(2)),
 	_param_ekf2_gps_v_noise(_params->gps_vel_noise),
 	_param_ekf2_gps_p_noise(_params->gps_pos_noise),
+#if defined(CONFIG_EKF2_GNSS_YAW)
+	_param_ekf2_gps_yaw_n(_params->gnss_heading_noise),
+#endif // CONFIG_EKF2_GNSS_YAW
 	_param_ekf2_gps_p_gate(_params->gps_pos_innov_gate),
 	_param_ekf2_gps_v_gate(_params->gps_vel_innov_gate),
 	_param_ekf2_gps_check(_params->gps_check_mask),
@@ -2169,7 +2172,9 @@ void EKF2::UpdateWheelEncoderSample(ekf2_timestamps_s &ekf2_timestamps)
 {
 	(void)ekf2_timestamps; // no dedicated relative timestamp field exists
 
-	if ((_param_ekf2_wenc_ctrl.get() == 0) || !(_param_ekf2_wenc_rad.get() > 0.f)) {
+	const float radius = _param_ekf2_wenc_rad.get();
+
+	if ((_param_ekf2_wenc_ctrl.get() == 0) || !PX4_ISFINITE(radius) || !(radius > 0.f)) {
 		return;
 	}
 
@@ -2183,8 +2188,21 @@ void EKF2::UpdateWheelEncoderSample(ekf2_timestamps_s &ekf2_timestamps)
 			return;
 		}
 
-		const float radius = _param_ekf2_wenc_rad.get();
+		// Do not insert an already-stale uORB sample into the EKF observation
+		// buffer. The same timeout controls fusion lifecycle inside the EKF.
+		const uint64_t now = hrt_absolute_time();
+		const uint64_t timeout_us =
+			static_cast<uint64_t>(math::max(_param_ekf2_wenc_tout.get(), 100.f) * 1000.f);
+
+		if ((wheel_encoders.timestamp > now) || ((now - wheel_encoders.timestamp) > timeout_us)) {
+			return;
+		}
+
 		const float v_fwd = 0.5f * (speed_right + speed_left) * radius;
+
+		if (!PX4_ISFINITE(v_fwd)) {
+			return;
+		}
 
 		wheelEncoderSample sample{
 			.time_us = wheel_encoders.timestamp,
