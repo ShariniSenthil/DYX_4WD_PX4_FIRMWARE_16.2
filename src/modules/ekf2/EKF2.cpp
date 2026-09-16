@@ -766,6 +766,7 @@ void EKF2::Run()
 			.vehicle_air_data_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
 			.vehicle_magnetometer_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
 			.visual_odometry_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
+			.wheel_encoders_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
 		};
 
 #if defined(CONFIG_EKF2_AIRSPEED)
@@ -2170,8 +2171,6 @@ void EKF2::UpdateAuxVelSample(ekf2_timestamps_s &ekf2_timestamps)
 #if defined(CONFIG_EKF2_WHEEL_ENCODER)
 void EKF2::UpdateWheelEncoderSample(ekf2_timestamps_s &ekf2_timestamps)
 {
-	(void)ekf2_timestamps; // no dedicated relative timestamp field exists
-
 	const float radius = _param_ekf2_wenc_rad.get();
 
 	if ((_param_ekf2_wenc_ctrl.get() == 0) || !PX4_ISFINITE(radius) || !(radius > 0.f)) {
@@ -2209,6 +2208,11 @@ void EKF2::UpdateWheelEncoderSample(ekf2_timestamps_s &ekf2_timestamps)
 			.vel_body_fwd = v_fwd,
 			.vel_fwd_var = sq(math::max(_param_ekf2_wenc_noise.get(), 0.01f)),
 		};
+
+		// Record the exact wheel observation time used by live EKF2 so replay can
+		// republish wheel_encoders at the same point on the EKF fusion timeline.
+		ekf2_timestamps.wheel_encoders_timestamp_rel = (int16_t)((int64_t)wheel_encoders.timestamp / 100 -
+				(int64_t)ekf2_timestamps.timestamp / 100);
 
 		_ekf.setWheelEncoderData(sample);
 	}

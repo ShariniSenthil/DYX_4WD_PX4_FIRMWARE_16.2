@@ -129,7 +129,12 @@ int Roboclaw::initializeUART()
 	uart_config.c_oflag &= ~OPOST;
 	uart_config.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
 	uart_config.c_cflag &= ~(CSIZE | PARENB);
-	uart_config.c_cflag |= CS8;
+	uart_config.c_cflag |= CS8 | CREAD | CLOCAL;
+
+	// readResponse() owns timeout handling with select(). Do not inherit a
+	// terminal-level byte-count or inter-byte timeout policy from the port.
+	uart_config.c_cc[VMIN] = 0;
+	uart_config.c_cc[VTIME] = 0;
 
 	// Set baud rate
 	ret = cfsetispeed(&uart_config, baud_rate_posix);
