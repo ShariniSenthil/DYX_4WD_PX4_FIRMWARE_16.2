@@ -53,6 +53,7 @@
 #include <uORB/topics/vehicle_optical_flow.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/vehicle_odometry.h>
+#include <uORB/topics/wheel_encoders.h>
 
 #include "ReplayEkf2.hpp"
 
@@ -90,7 +91,7 @@ ReplayEkf2::handleTopicUpdate(Subscription &sub, void *data, std::ifstream &repl
 		return true;
 
 	} else if (sub.orb_meta == ORB_ID(vehicle_status) || sub.orb_meta == ORB_ID(vehicle_land_detected)
-		   || sub.orb_meta == ORB_ID(vehicle_gps_position)) {
+		   || sub.orb_meta == ORB_ID(vehicle_gps_position) || sub.orb_meta == ORB_ID(wheel_encoders)) {
 		return publishTopic(sub, data);
 	} // else: do not publish
 
@@ -143,9 +144,10 @@ ReplayEkf2::onSubscriptionAdded(Subscription &sub, uint16_t msg_id)
 	// the main loop should only handle publication of the following topics, the sensor topics are
 	// handled separately in publishEkf2Topics()
 	// Note: the GPS is not treated here since not missing data is more important than the accuracy of the timestamp
+	// Replay wheel samples by their logged timestamps; older logs have no relative wheel timestamp in ekf2_timestamps.
 	sub.ignored = sub.orb_meta != ORB_ID(ekf2_timestamps) && sub.orb_meta != ORB_ID(vehicle_status)
 		      && sub.orb_meta != ORB_ID(vehicle_land_detected) && sub.orb_meta != ORB_ID(vehicle_gps_position)
-		      && sub.orb_meta != ORB_ID(sensor_combined);
+		      && sub.orb_meta != ORB_ID(sensor_combined) && sub.orb_meta != ORB_ID(wheel_encoders);
 }
 
 bool
