@@ -83,6 +83,17 @@ void RoverLandDetector::_update_topics()
 		_home_position_sub.copy(&home_position);
 		_home_position = matrix::Vector2d(home_position.lat, home_position.lon);
 	}
+
+	wheel_encoders_s wheel_encoders{};
+
+	if (_wheel_encoders_sub.update(&wheel_encoders)) {
+		static constexpr float WHEEL_MOVING_THRESHOLD_RAD_S = 0.05f;
+
+		if ((fabsf(wheel_encoders.wheel_speed[0]) > WHEEL_MOVING_THRESHOLD_RAD_S)
+		    || (fabsf(wheel_encoders.wheel_speed[1]) > WHEEL_MOVING_THRESHOLD_RAD_S)) {
+			_mark_movement_detected(wheel_encoders.timestamp);
+		}
+	}
 }
 
 void RoverLandDetector::_set_hysteresis_factor(const int factor)

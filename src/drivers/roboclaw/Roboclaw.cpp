@@ -57,7 +57,9 @@ Roboclaw::Roboclaw(const char *device_name, const char *bad_rate_parameter) :
 
 Roboclaw::~Roboclaw()
 {
-	close(_uart_fd);
+	if (_uart_fd >= 0) {
+		close(_uart_fd);
+	}
 }
 
 int Roboclaw::initializeUART()
@@ -164,6 +166,8 @@ int Roboclaw::initializeUART()
 
 	} else {
 		PX4_INFO("Successfully connected");
+		_consecutive_encoder_failures = 0;
+		publishEscStatus(true);
 		return OK;
 	}
 }
@@ -175,16 +179,26 @@ bool Roboclaw::updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
 
 	if (_vehicle_status_sub.copy(&vehicle_status)) {
 		if (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER) {
-			setMotorSpeed(Motor::Right, 0.f);
-			setMotorSpeed(Motor::Left, 0.f);
-			return true;
+			const bool ok = (setMotorSpeed(Motor::Right, 0.f) == OK)
+					&& (setMotorSpeed(Motor::Left, 0.f) == OK);
+
+			if (!ok) {
+				markCommunicationFailed("RoboClaw stop command failed");
+			}
+
+			return ok;
 		}
 	}
 
 	if (stop_motors) {
-		setMotorSpeed(Motor::Right, 0.f);
-		setMotorSpeed(Motor::Left, 0.f);
-		return true;
+		const bool ok = (setMotorSpeed(Motor::Right, 0.f) == OK)
+				&& (setMotorSpeed(Motor::Left, 0.f) == OK);
+
+		if (!ok) {
+			markCommunicationFailed("RoboClaw stop command failed");
+		}
+
+		return ok;
 	}
 
 	// Verified rover mapping:
@@ -193,8 +207,13 @@ bool Roboclaw::updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
 	float right_motor_output = ((float)outputs[0] - 128.0f) / 127.f;
 	float left_motor_output = ((float)outputs[1] - 128.0f) / 127.f;
 
-	setMotorSpeed(Motor::Right, right_motor_output);
-	setMotorSpeed(Motor::Left, left_motor_output);
+	const bool right_ok = setMotorSpeed(Motor::Right, right_motor_output) == OK;
+	const bool left_ok = setMotorSpeed(Motor::Left, left_motor_output) == OK;
+
+	if (!right_ok || !left_ok) {
+		markCommunicationFailed("RoboClaw motor command failed");
+		return false;
+	}
 
 	return true;
 }
@@ -245,10 +264,23 @@ void Roboclaw::Run()
 			_last_encoder_read = now;
 
 			if (readEncoder() != OK) {
+				_consecutive_encoder_failures++;
+
 				if ((_last_encoder_warn == 0) || (now - _last_encoder_warn > 1000000ULL)) {
 					PX4_WARN("Rear encoder read failed");
 					_last_encoder_warn = now;
 				}
+
+				if (_consecutive_encoder_failures >= 3) {
+					markCommunicationFailed("RoboClaw encoder communication lost");
+					_consecutive_encoder_failures = 0;
+					ScheduleDelayed(100_ms);
+					return;
+				}
+
+			} else {
+				_consecutive_encoder_failures = 0;
+				publishEscStatus(true);
 			}
 		}
 	}
@@ -311,7 +343,7 @@ int Roboclaw::readEncoder()
 	return OK;
 }
 
-void Roboclaw::setMotorSpeed(Motor motor, float value)
+int Roboclaw::setMotorSpeed(Motor motor, float value)
 {
 	value = math::constrain(value, -1.f, 1.f);
 
@@ -329,13 +361,13 @@ void Roboclaw::setMotorSpeed(Motor motor, float value)
 				     : 0;
 
 		if (motor == Motor::Right) {
-			sendSigned32Bit(Command::DriveSpeedMotor1, qpps);
+			return sendSigned32Bit(Command::DriveSpeedMotor1, qpps);
 
 		} else if (motor == Motor::Left) {
-			sendSigned32Bit(Command::DriveSpeedMotor2, qpps);
+			return sendSigned32Bit(Command::DriveSpeedMotor2, qpps);
 		}
 
-		return;
+		return ERROR;
 	}
 
 	// Legacy open-loop path retained for instant rollback with RBCLW_VEL_CTRL=0.
@@ -348,10 +380,10 @@ void Roboclaw::setMotorSpeed(Motor motor, float value)
 		command = value > 0.f ? Command::DriveForwardMotor2 : Command::DriveBackwardsMotor2;
 
 	} else {
-		return;
+		return ERROR;
 	}
 
-	sendUnsigned7Bit(command, value);
+	return sendUnsigned7Bit(command, value);
 }
 
 void Roboclaw::setMotorDutyCycle(Motor motor, float value)
@@ -369,7 +401,7 @@ void Roboclaw::setMotorDutyCycle(Motor motor, float value)
 		return;
 	}
 
-	return sendSigned16Bit(command, value);
+	(void)sendSigned16Bit(command, value);
 }
 
 void Roboclaw::resetEncoders()
@@ -377,7 +409,7 @@ void Roboclaw::resetEncoders()
 	sendTransaction(Command::ResetEncoders, nullptr, 0);
 }
 
-void Roboclaw::sendUnsigned7Bit(Command command, float data)
+int Roboclaw::sendUnsigned7Bit(Command command, float data)
 {
 	data = fabs(data);
 
@@ -386,26 +418,58 @@ void Roboclaw::sendUnsigned7Bit(Command command, float data)
 	}
 
 	auto byte = (uint8_t)(data * INT8_MAX);
-	sendTransaction(command, &byte, 1);
+	return sendTransaction(command, &byte, 1);
 }
 
-void Roboclaw::sendSigned16Bit(Command command, float data)
+int Roboclaw::sendSigned16Bit(Command command, float data)
 {
 	int16_t value = math::constrain(data, -1.f, 1.f) * INT16_MAX;
 	uint8_t buff[2];
 	buff[0] = (value >> 8) & 0xFF; // High byte
 	buff[1] = value & 0xFF; // Low byte
-	sendTransaction(command, (uint8_t *) &buff, 2);
+	return sendTransaction(command, (uint8_t *) &buff, 2);
 }
 
-void Roboclaw::sendSigned32Bit(Command command, int32_t value)
+int Roboclaw::sendSigned32Bit(Command command, int32_t value)
 {
 	uint8_t buff[4];
 	buff[0] = (value >> 24) & 0xFF;
 	buff[1] = (value >> 16) & 0xFF;
 	buff[2] = (value >> 8) & 0xFF;
 	buff[3] = value & 0xFF;
-	sendTransaction(command, buff, sizeof(buff));
+	return sendTransaction(command, buff, sizeof(buff));
+}
+
+
+void Roboclaw::publishEscStatus(bool online)
+{
+	esc_status_s status{};
+	status.timestamp = hrt_absolute_time();
+	status.counter = ++_esc_status_counter;
+	status.esc_count = 2;
+	status.esc_connectiontype = esc_status_s::ESC_CONNECTION_TYPE_SERIAL;
+	status.esc_online_flags = online ? 0x03 : 0x00;
+	status.esc_armed_flags = 0x03;
+
+	status.esc[0].timestamp = status.timestamp;
+	status.esc[0].esc_address = 1;
+	status.esc[1].timestamp = status.timestamp;
+	status.esc[1].esc_address = 2;
+
+	_esc_status_pub.publish(status);
+}
+
+void Roboclaw::markCommunicationFailed(const char *reason)
+{
+	PX4_ERR("%s", reason);
+	publishEscStatus(false);
+
+	if (_uart_fd >= 0) {
+		close(_uart_fd);
+		_uart_fd = -1;
+	}
+
+	_uart_initialized = false;
 }
 
 int Roboclaw::sendTransaction(Command cmd, uint8_t *write_buffer, size_t bytes_to_write)

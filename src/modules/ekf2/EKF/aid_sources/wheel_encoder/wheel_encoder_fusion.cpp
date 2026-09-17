@@ -98,7 +98,11 @@ void Ekf::controlWheelEncoderFusion(const imuSample &imu_sample)
 
 	_aid_src_wheel_encoder.fused = true;
 	_aid_src_wheel_encoder.time_last_fuse = _time_delayed_us;
-	_time_last_hor_vel_fuse = _time_delayed_us;
+
+	// Wheel speed is deliberately a secondary rover aid. Do not refresh the
+	// shared horizontal-velocity fusion timestamp here: GNSS recovery/reset
+	// logic uses that timestamp to decide whether a returning GNSS velocity
+	// source needs to reset the velocity state.
 
 	if (!_wheel_encoder_fusion_active) {
 		ECL_INFO("starting wheel encoder fusion");

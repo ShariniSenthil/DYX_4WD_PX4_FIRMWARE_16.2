@@ -142,6 +142,13 @@ protected:
 	virtual bool _get_close_to_ground_or_skipped_check() {  return false; }
 	virtual void _set_hysteresis_factor(const int factor) = 0;
 
+	void _mark_movement_detected(hrt_abstime timestamp)
+	{
+		if (timestamp > _time_last_move_detect_us) {
+			_time_last_move_detect_us = timestamp;
+		}
+	}
+
 	systemlib::Hysteresis _freefall_hysteresis{false};
 	systemlib::Hysteresis _landed_hysteresis{true};
 	systemlib::Hysteresis _maybe_landed_hysteresis{true};
