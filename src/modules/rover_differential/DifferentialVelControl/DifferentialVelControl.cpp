@@ -129,19 +129,28 @@ void DifferentialVelControl::generateVelocitySetpoint()
 		differential_velocity_setpoint.timestamp = _timestamp;
 
 		const float travel_speed = velocity_in_local_frame.norm();
+		constexpr float stationary_yaw_speed_threshold = 0.01f;
+		const bool offboard_speed_yaw_rate_control =
+			PX4_ISFINITE(trajectory_setpoint.yaw) && PX4_ISFINITE(trajectory_setpoint.yawspeed);
 
-		if (travel_speed < FLT_EPSILON) {
-			// P4 only:
-			// A zero velocity vector has no valid travel bearing. Retain
-			// the current rover yaw so a zero command cannot request a
-			// stale-bearing or North-facing pivot.
-			differential_velocity_setpoint.speed = 0.f;
-			differential_velocity_setpoint.bearing = _vehicle_yaw;
+		differential_velocity_setpoint.speed =
+			travel_speed < stationary_yaw_speed_threshold ? 0.f : travel_speed;
+
+		if (offboard_speed_yaw_rate_control) {
+			// Jetson owns the motion plan. Keep the Jetson absolute yaw target
+			// available in PX4 for target-state/telemetry, but do not let the
+			// velocity controller derive steering from yaw error.
+			differential_velocity_setpoint.bearing = matrix::wrap_pi(trajectory_setpoint.yaw);
+
+		} else if (travel_speed >= stationary_yaw_speed_threshold) {
+			// Native PX4 v1.16.2 velocity-vector steering outside the
+			// Jetson full-authority speed + yaw + yaw-rate contract.
+			differential_velocity_setpoint.bearing =
+				atan2f(velocity_in_local_frame(1), velocity_in_local_frame(0));
 
 		} else {
-			// Default PX4 v1.16.2 behavior for every nonzero vector.
-			differential_velocity_setpoint.speed = travel_speed;
-			differential_velocity_setpoint.bearing = atan2f(velocity_in_local_frame(1), velocity_in_local_frame(0));
+			// Zero velocity with no full-authority command: hold current yaw.
+			differential_velocity_setpoint.bearing = _vehicle_yaw;
 		}
 
 		_differential_velocity_setpoint_pub.publish(differential_velocity_setpoint);
@@ -154,16 +163,32 @@ void DifferentialVelControl::generateAttitudeAndThrottleSetpoint()
 		_differential_velocity_setpoint_sub.copy(&_differential_velocity_setpoint);
 	}
 
-	// Attitude Setpoint
+	trajectory_setpoint_s trajectory_setpoint{};
+	_trajectory_setpoint_sub.copy(&trajectory_setpoint);
+
+	const bool offboard_speed_yaw_rate_control =
+		_vehicle_control_mode.flag_control_offboard_enabled
+		&& _offboard_control_mode.velocity
+		&& !_offboard_control_mode.position
+		&& PX4_ISFINITE(trajectory_setpoint.yaw)
+		&& PX4_ISFINITE(trajectory_setpoint.yawspeed);
+
+	// Keep the Jetson yaw target visible in the rover attitude setpoint.
+	// DifferentialAttControl explicitly does not actuate this yaw target
+	// while the Jetson full-authority contract is active.
 	rover_attitude_setpoint_s rover_attitude_setpoint{};
 	rover_attitude_setpoint.timestamp = _timestamp;
 	rover_attitude_setpoint.yaw_setpoint = _differential_velocity_setpoint.bearing;
 	_rover_attitude_setpoint_pub.publish(rover_attitude_setpoint);
 
-	// Throttle Setpoint
 	const float heading_error = matrix::wrap_pi(_differential_velocity_setpoint.bearing - _vehicle_yaw);
 
-	if (_current_state == DrivingState::DRIVING && fabsf(heading_error) > _param_rd_trans_drv_trn.get()) {
+	if (offboard_speed_yaw_rate_control) {
+		// Jetson decides DRIVE/PIVOT/SETTLE/CAPTURE. Do not allow RD_TRANS_*
+		// to stop translation or create a second pivot state machine in PX4.
+		_current_state = DrivingState::DRIVING;
+
+	} else if (_current_state == DrivingState::DRIVING && fabsf(heading_error) > _param_rd_trans_drv_trn.get()) {
 		_current_state = DrivingState::SPOT_TURNING;
 
 	} else if (_current_state == DrivingState::SPOT_TURNING && fabsf(heading_error) < _param_rd_trans_trn_drv.get()) {
@@ -184,7 +209,7 @@ void DifferentialVelControl::generateAttitudeAndThrottleSetpoint()
 		}
 
 		if (fabsf(speed_body_x_setpoint_normalized) > 1.f - fabsf(
-			    _rover_steering_setpoint.normalized_speed_diff)) { // Adjust speed setpoint if it is infeasible due to the desired speed difference of the left/right wheels
+			    _rover_steering_setpoint.normalized_speed_diff)) {
 			speed_body_x_setpoint = math::interpolate<float>(sign(speed_body_x_setpoint_normalized) * (1.f - fabsf(
 							_rover_steering_setpoint.normalized_speed_diff)), -1.f, 1.f,
 						- _param_ro_max_thr_speed.get(), _param_ro_max_thr_speed.get());

@@ -255,6 +255,14 @@ struct auxVelSample {
 };
 #endif // CONFIG_EKF2_AUXVEL
 
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+struct wheelEncoderSample {
+	uint64_t time_us{};        ///< measurement timestamp (uSec)
+	float vel_body_fwd{};      ///< rear-axle midpoint forward velocity (m/s)
+	float vel_fwd_var{};       ///< forward velocity variance ((m/s)^2)
+};
+#endif // CONFIG_EKF2_WHEEL_ENCODER
+
 struct systemFlagUpdate {
 	uint64_t time_us{};
 	bool at_rest{false};
@@ -501,6 +509,16 @@ struct parameters {
 	const float auxvel_noise{0.5f};         ///< minimum observation noise, uses reported noise if greater (m/s)
 	const float auxvel_gate{5.0f};          ///< velocity fusion innovation consistency gate size (STD)
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	int32_t wenc_ctrl {0};
+	float wenc_rad{0.0f};
+	float wenc_delay_ms{0.0f};
+	float wenc_noise{0.20f};
+	float wenc_gate{5.0f};
+	float wenc_timeout_ms{500.0f};
+	Vector3f wenc_pos_body{};               ///< rear encoder axle midpoint in body frame (m)
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 };
 

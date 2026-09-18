@@ -415,6 +415,10 @@ public:
 	const auto &aid_src_aux_vel() const { return _aid_src_aux_vel; }
 #endif // CONFIG_EKF2_AUXVEL
 
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	const auto &aid_src_wheel_encoder() const { return _aid_src_wheel_encoder; }
+#endif // CONFIG_EKF2_WHEEL_ENCODER
+
 	bool resetGlobalPosToExternalObservation(double latitude, double longitude, float altitude, float eph, float epv,
 			uint64_t timestamp_observation);
 
@@ -589,6 +593,11 @@ private:
 #if defined(CONFIG_EKF2_AUXVEL)
 	estimator_aid_source2d_s _aid_src_aux_vel {};
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	estimator_aid_source1d_s _aid_src_wheel_encoder {};
+	bool _wheel_encoder_fusion_active{false};
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 	// Variables used by the initial filter alignment
 	bool _is_first_imu_sample{true};
@@ -956,6 +965,11 @@ private:
 	void controlAuxVelFusion(const imuSample &imu_sample);
 	void stopAuxVelFusion();
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	void controlWheelEncoderFusion(const imuSample &imu_sample);
+	void stopWheelEncoderFusion();
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 	void checkVerticalAccelerationHealth(const imuSample &imu_delayed);
 	Likelihood estimateInertialNavFallingLikelihood() const;

@@ -171,6 +171,29 @@ void DifferentialAttControl::generateRateSetpoint()
 		_rover_rate_setpoint_sub.copy(&_rover_rate_setpoint);
 	}
 
+	if (_offboard_control_mode_sub.updated()) {
+		_offboard_control_mode_sub.copy(&_offboard_control_mode);
+	}
+
+	trajectory_setpoint_s trajectory_setpoint{};
+	_trajectory_setpoint_sub.copy(&trajectory_setpoint);
+
+	const bool offboard_speed_yaw_rate_control =
+		_vehicle_control_mode.flag_control_offboard_enabled
+		&& _offboard_control_mode.velocity
+		&& !_offboard_control_mode.position
+		&& PX4_ISFINITE(trajectory_setpoint.yaw)
+		&& PX4_ISFINITE(trajectory_setpoint.yawspeed);
+
+	if (offboard_speed_yaw_rate_control) {
+		// Jetson supplies both target yaw and signed yaw-rate. The target yaw
+		// remains available for telemetry/validation, but PX4 must not turn
+		// yaw error into a second yaw-rate command.
+		_pid_yaw.resetIntegral();
+		_adjusted_yaw_setpoint.setForcedValue(_vehicle_yaw);
+		return;
+	}
+
 	// Check if a new rate setpoint was already published from somewhere else
 	if (_rover_rate_setpoint.timestamp > _last_rate_setpoint_update
 	    && _rover_rate_setpoint.timestamp > _rover_attitude_setpoint.timestamp) {
