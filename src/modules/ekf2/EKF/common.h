@@ -511,7 +511,7 @@ struct parameters {
 #endif // CONFIG_EKF2_AUXVEL
 
 #if defined(CONFIG_EKF2_WHEEL_ENCODER)
-	int32_t wenc_ctrl{0};
+	int32_t wenc_ctrl {0};
 	float wenc_rad{0.0f};
 	float wenc_delay_ms{0.0f};
 	float wenc_noise{0.20f};

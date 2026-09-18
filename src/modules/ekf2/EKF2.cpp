@@ -898,9 +898,11 @@ void EKF2::VerifyParams()
 #endif // CONFIG_EKF2_AUXVEL
 
 #if defined(CONFIG_EKF2_WHEEL_ENCODER)
+
 	if (_param_ekf2_wenc_delay.get() > delay_max) {
 		delay_max = _param_ekf2_wenc_delay.get();
 	}
+
 #endif // CONFIG_EKF2_WHEEL_ENCODER
 
 #if defined(CONFIG_EKF2_BAROMETER)

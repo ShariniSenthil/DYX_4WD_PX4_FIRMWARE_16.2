@@ -175,72 +175,38 @@ void DifferentialAttControl::generateRateSetpoint()
 		_offboard_control_mode_sub.copy(&_offboard_control_mode);
 	}
 
+	trajectory_setpoint_s trajectory_setpoint{};
+	_trajectory_setpoint_sub.copy(&trajectory_setpoint);
+
+	const bool offboard_speed_yaw_rate_control =
+		_vehicle_control_mode.flag_control_offboard_enabled
+		&& _offboard_control_mode.velocity
+		&& !_offboard_control_mode.position
+		&& PX4_ISFINITE(trajectory_setpoint.yaw)
+		&& PX4_ISFINITE(trajectory_setpoint.yawspeed);
+
+	if (offboard_speed_yaw_rate_control) {
+		// Jetson supplies both target yaw and signed yaw-rate. The target yaw
+		// remains available for telemetry/validation, but PX4 must not turn
+		// yaw error into a second yaw-rate command.
+		_pid_yaw.resetIntegral();
+		_adjusted_yaw_setpoint.setForcedValue(_vehicle_yaw);
+		return;
+	}
+
 	// Check if a new rate setpoint was already published from somewhere else
 	if (_rover_rate_setpoint.timestamp > _last_rate_setpoint_update
 	    && _rover_rate_setpoint.timestamp > _rover_attitude_setpoint.timestamp) {
 		return;
 	}
 
-	// CUSTOM DYX ROVER OFFBOARD PIVOT CONTRACT:
-	// trajectory_setpoint.yaw is the absolute heading target.
-	// During a stationary OFFBOARD velocity-mode pivot, a finite
-	// trajectory_setpoint.yawspeed is intentionally interpreted as an
-	// unsigned requested pivot-speed magnitude, not as a signed yaw-rate
-	// command. The yawspeed sign is ignored; pivot direction comes from
-	// the signed yaw error to the absolute yaw target.
-	// NaN means no Jetson pivot-speed override and RO_YAW_RATE_LIM is used.
-	// Zero explicitly pauses the pivot. Any nonzero requested magnitude is
-	// capped by RO_YAW_RATE_LIM, which remains the FCU hard safety ceiling.
-	float commanded_yaw_rate_limit = _max_yaw_rate;
-	bool pause_offboard_pivot = false;
-
-	if (_vehicle_control_mode.flag_control_offboard_enabled
-	    && _offboard_control_mode.velocity && !_offboard_control_mode.position) {
-		trajectory_setpoint_s trajectory_setpoint{};
-
-		if (_trajectory_setpoint_sub.copy(&trajectory_setpoint)) {
-			constexpr float stationary_yaw_speed_threshold = 0.01f;
-			const matrix::Vector2f velocity_setpoint(trajectory_setpoint.velocity[0], trajectory_setpoint.velocity[1]);
-			const bool stationary = velocity_setpoint.isAllFinite()
-						&& velocity_setpoint.norm() < stationary_yaw_speed_threshold;
-			const bool trajectory_setpoint_fresh = trajectory_setpoint.timestamp > 0
-						&& _timestamp >= trajectory_setpoint.timestamp
-						&& (_timestamp - trajectory_setpoint.timestamp) < 500_ms;
-
-			if (stationary && trajectory_setpoint_fresh
-			    && PX4_ISFINITE(trajectory_setpoint.yaw) && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
-				const float requested_pivot_rate = fabsf(trajectory_setpoint.yawspeed);
-
-				if (requested_pivot_rate <= FLT_EPSILON) {
-					pause_offboard_pivot = true;
-
-				} else {
-					commanded_yaw_rate_limit = math::constrain(requested_pivot_rate, 0.f, _max_yaw_rate);
-				}
-			}
-		}
-	}
-
-	float yaw_rate_setpoint = 0.f;
-
-	if (pause_offboard_pivot) {
-		// A zero OFFBOARD yawspeed explicitly pauses the pivot. Keep the
-		// internal yaw slew state at the measured yaw so a later nonzero
-		// command resumes smoothly from the current heading.
-		_adjusted_yaw_setpoint.setForcedValue(_vehicle_yaw);
-		_pid_yaw.resetIntegral();
-
-	} else {
-		yaw_rate_setpoint = RoverControl::attitudeControl(_adjusted_yaw_setpoint, _pid_yaw,
-				    commanded_yaw_rate_limit,
-				    _vehicle_yaw, _rover_attitude_setpoint.yaw_setpoint, _dt);
-	}
+	const float yaw_rate_setpoint = RoverControl::attitudeControl(_adjusted_yaw_setpoint, _pid_yaw, _max_yaw_rate,
+					_vehicle_yaw, _rover_attitude_setpoint.yaw_setpoint, _dt);
 
 	_last_rate_setpoint_update = _timestamp;
 	rover_rate_setpoint_s rover_rate_setpoint{};
 	rover_rate_setpoint.timestamp = _timestamp;
-	rover_rate_setpoint.yaw_rate_setpoint =
-		math::constrain(yaw_rate_setpoint, -commanded_yaw_rate_limit, commanded_yaw_rate_limit);
+	rover_rate_setpoint.yaw_rate_setpoint = math::constrain(yaw_rate_setpoint, -_max_yaw_rate, _max_yaw_rate);
 	_rover_rate_setpoint_pub.publish(rover_rate_setpoint);
 }
 

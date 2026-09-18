@@ -64,9 +64,9 @@ bool RoverLandDetector::_get_landed_state()
 		return true; // If the rover reaches the home position during RTL we say we have landed.
 
 	} else {
-		// Ground rover is always physically on the ground.
-		// Arming must not make EKF2 use aircraft in-air recovery logic.
-		return true;
+		// Preserve PX4 rover landed-state semantics: armed means active/not landed.
+		// Wheel-motion tracking below remains available for rover health logic.
+		return !_armed;
 	}
 }
 
