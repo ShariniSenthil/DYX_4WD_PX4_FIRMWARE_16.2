@@ -64,9 +64,9 @@ bool RoverLandDetector::_get_landed_state()
 		return true; // If the rover reaches the home position during RTL we say we have landed.
 
 	} else {
-		// Preserve PX4 rover landed-state semantics: armed means active/not landed.
-		// Wheel-motion tracking below remains available for rover health logic.
-		return !_armed;
+		// Ground rover remains physically landed even while armed.
+		// Rover motion is monitored independently using wheel encoders.
+		return true;
 	}
 }
 

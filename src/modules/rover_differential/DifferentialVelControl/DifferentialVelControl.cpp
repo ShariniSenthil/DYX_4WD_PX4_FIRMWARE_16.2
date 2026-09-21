@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "DifferentialVelControl.hpp"
+#include "../JetsonFullAuthority.hpp"
 
 using namespace time_literals;
 
@@ -130,8 +131,8 @@ void DifferentialVelControl::generateVelocitySetpoint()
 
 		const float travel_speed = velocity_in_local_frame.norm();
 		constexpr float stationary_yaw_speed_threshold = 0.01f;
-		const bool offboard_speed_yaw_rate_control =
-			PX4_ISFINITE(trajectory_setpoint.yaw) && PX4_ISFINITE(trajectory_setpoint.yawspeed);
+		const bool offboard_speed_yaw_rate_control = RoverControlContract::isJetsonFullAuthority(
+				_vehicle_control_mode, _offboard_control_mode, trajectory_setpoint);
 
 		differential_velocity_setpoint.speed =
 			travel_speed < stationary_yaw_speed_threshold ? 0.f : travel_speed;
@@ -166,12 +167,8 @@ void DifferentialVelControl::generateAttitudeAndThrottleSetpoint()
 	trajectory_setpoint_s trajectory_setpoint{};
 	_trajectory_setpoint_sub.copy(&trajectory_setpoint);
 
-	const bool offboard_speed_yaw_rate_control =
-		_vehicle_control_mode.flag_control_offboard_enabled
-		&& _offboard_control_mode.velocity
-		&& !_offboard_control_mode.position
-		&& PX4_ISFINITE(trajectory_setpoint.yaw)
-		&& PX4_ISFINITE(trajectory_setpoint.yawspeed);
+	const bool offboard_speed_yaw_rate_control = RoverControlContract::isJetsonFullAuthority(
+			_vehicle_control_mode, _offboard_control_mode, trajectory_setpoint);
 
 	// Keep the Jetson yaw target visible in the rover attitude setpoint.
 	// DifferentialAttControl explicitly does not actuate this yaw target
