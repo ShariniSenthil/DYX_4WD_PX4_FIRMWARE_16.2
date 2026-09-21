@@ -147,6 +147,11 @@ void Ekf::controlFusionModes(const imuSample &imu_delayed)
 	controlAuxVelFusion(imu_delayed);
 #endif // CONFIG_EKF2_AUXVEL
 
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	// Rear wheel encoder body-frame velocity is a secondary ground-rover aid.
+	controlWheelEncoderFusion(imu_delayed);
+#endif // CONFIG_EKF2_WHEEL_ENCODER
+
 #if defined(CONFIG_EKF2_TERRAIN)
 	controlTerrainFakeFusion();
 	updateTerrainValidity();

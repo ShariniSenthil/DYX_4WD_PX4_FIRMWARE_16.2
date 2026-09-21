@@ -53,6 +53,7 @@
 #include <uORB/topics/vehicle_optical_flow.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/vehicle_odometry.h>
+#include <uORB/topics/wheel_encoders.h>
 
 #include "ReplayEkf2.hpp"
 
@@ -127,6 +128,9 @@ ReplayEkf2::onSubscriptionAdded(Subscription &sub, uint16_t msg_id)
 	} else if (sub.orb_meta == ORB_ID(aux_global_position)) {
 		_aux_global_position_msg_id = msg_id;
 
+	} else if (sub.orb_meta == ORB_ID(wheel_encoders)) {
+		_wheel_encoders_msg_id = msg_id;
+
 	} else if (sub.orb_meta == ORB_ID(vehicle_local_position_groundtruth)) {
 		_vehicle_local_position_groundtruth_msg_id = msg_id;
 
@@ -158,6 +162,7 @@ ReplayEkf2::publishEkf2Topics(sensor_combined_s &sensor_combined, std::ifstream 
 	findTimestampAndPublish(sensor_combined.timestamp, _vehicle_magnetometer_msg_id, replay_file);
 	findTimestampAndPublish(sensor_combined.timestamp, _vehicle_visual_odometry_msg_id, replay_file);
 	findTimestampAndPublish(sensor_combined.timestamp, _aux_global_position_msg_id, replay_file);
+	findTimestampAndPublish(sensor_combined.timestamp, _wheel_encoders_msg_id, replay_file);
 
 	// sensor_combined: publish last because ekf2 is polling on this
 	if (_last_sensor_combined_timestamp > 0) {
@@ -192,6 +197,8 @@ ReplayEkf2::publishEkf2Topics(const ekf2_timestamps_s &ekf2_timestamps, std::ifs
 	handle_sensor_publication(ekf2_timestamps.vehicle_air_data_timestamp_rel, _vehicle_air_data_msg_id);
 	handle_sensor_publication(ekf2_timestamps.vehicle_magnetometer_timestamp_rel, _vehicle_magnetometer_msg_id);
 	handle_sensor_publication(ekf2_timestamps.visual_odometry_timestamp_rel, _vehicle_visual_odometry_msg_id);
+	handle_sensor_publication(ekf2_timestamps.wheel_encoders_timestamp_rel, _wheel_encoders_msg_id);
+
 	handle_sensor_publication(0, _aux_global_position_msg_id);
 	handle_sensor_publication(0, _vehicle_local_position_groundtruth_msg_id);
 	handle_sensor_publication(0, _vehicle_global_position_groundtruth_msg_id);
@@ -289,6 +296,7 @@ ReplayEkf2::onExitMainLoop()
 	print_sensor_statistics(_vehicle_magnetometer_msg_id, "vehicle_magnetometer");
 	print_sensor_statistics(_vehicle_visual_odometry_msg_id, "vehicle_visual_odometry");
 	print_sensor_statistics(_aux_global_position_msg_id, "aux_global_position");
+	print_sensor_statistics(_wheel_encoders_msg_id, "wheel_encoders");
 }
 
 } // namespace px4

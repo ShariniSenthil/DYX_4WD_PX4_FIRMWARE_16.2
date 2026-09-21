@@ -45,6 +45,7 @@
 #include <lib/geo/geo.h>
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/home_position.h>
+#include <uORB/topics/wheel_encoders.h>
 
 namespace land_detector
 {
@@ -64,6 +65,7 @@ protected:
 private:
 	uORB::Subscription _vehicle_global_position_sub{ORB_ID(vehicle_global_position)};
 	uORB::Subscription _home_position_sub{ORB_ID(home_position)};
+	uORB::Subscription _wheel_encoders_sub{ORB_ID(wheel_encoders)};
 	matrix::Vector2d _curr_pos{};
 	matrix::Vector2d _home_position{};
 

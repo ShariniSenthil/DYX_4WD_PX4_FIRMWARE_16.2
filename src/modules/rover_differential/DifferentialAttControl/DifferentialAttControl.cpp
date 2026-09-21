@@ -32,6 +32,7 @@
  ****************************************************************************/
 
 #include "DifferentialAttControl.hpp"
+#include "../JetsonFullAuthority.hpp"
 
 using namespace time_literals;
 
@@ -169,6 +170,25 @@ void DifferentialAttControl::generateRateSetpoint()
 
 	if (_rover_rate_setpoint_sub.updated()) {
 		_rover_rate_setpoint_sub.copy(&_rover_rate_setpoint);
+	}
+
+	if (_offboard_control_mode_sub.updated()) {
+		_offboard_control_mode_sub.copy(&_offboard_control_mode);
+	}
+
+	trajectory_setpoint_s trajectory_setpoint{};
+	_trajectory_setpoint_sub.copy(&trajectory_setpoint);
+
+	const bool offboard_speed_yaw_rate_control = RoverControlContract::isJetsonFullAuthority(
+			_vehicle_control_mode, _offboard_control_mode, trajectory_setpoint);
+
+	if (offboard_speed_yaw_rate_control) {
+		// Jetson supplies both target yaw and signed yaw-rate. The target yaw
+		// remains available for telemetry/validation, but PX4 must not turn
+		// yaw error into a second yaw-rate command.
+		_pid_yaw.resetIntegral();
+		_adjusted_yaw_setpoint.setForcedValue(_vehicle_yaw);
+		return;
 	}
 
 	// Check if a new rate setpoint was already published from somewhere else

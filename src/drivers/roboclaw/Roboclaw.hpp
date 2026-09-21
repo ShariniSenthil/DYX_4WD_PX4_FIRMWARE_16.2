@@ -43,6 +43,7 @@
 #pragma once
 
 #include <lib/mixer_module/mixer_module.hpp>
+#include <drivers/drv_hrt.h>
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/module_params.h>
 #include <sys/select.h>
@@ -53,6 +54,7 @@
 #include <uORB/topics/parameter_update.h>
 
 #include <uORB/Publication.hpp>
+#include <uORB/topics/esc_status.h>
 #include <uORB/topics/wheel_encoders.h>
 
 class Roboclaw : public ModuleBase<Roboclaw>, public OutputModuleInterface
@@ -81,7 +83,7 @@ public:
 	bool updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
 			   unsigned num_outputs, unsigned num_control_groups_updated) override;
 
-	void setMotorSpeed(Motor motor, float value); ///< rev/sec
+	int setMotorSpeed(Motor motor, float value); ///< normalized side command
 	void setMotorDutyCycle(Motor motor, float value);
 	int readEncoder();
 	void resetEncoders();
@@ -96,6 +98,8 @@ private:
 		DriveBackwardsMotor2 = 5,
 		DutyCycleMotor1 = 32,
 		DutyCycleMotor2 = 33,
+		DriveSpeedMotor1 = 35,   // M1 signed speed target (QPPS)
+		DriveSpeedMotor2 = 36,   // M2 signed speed target (QPPS)
 
 		ReadSpeedMotor1 = 18,
 		ReadSpeedMotor2 = 19,
@@ -110,12 +114,16 @@ private:
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Publication<wheel_encoders_s> _wheel_encoders_pub{ORB_ID(wheel_encoders)};
+	uORB::Publication<esc_status_s> _esc_status_pub{ORB_ID(esc_status)};
 
 	char _stored_device_name[256]; // Adjust size as necessary
 	char _stored_baud_rate_parameter[256]; // Adjust size as necessary
 
-	void sendUnsigned7Bit(Command command, float data);
-	void sendSigned16Bit(Command command, float data);
+	int sendUnsigned7Bit(Command command, float data);
+	int sendSigned16Bit(Command command, float data);
+	int sendSigned32Bit(Command command, int32_t value);
+	void publishEscStatus(bool online);
+	void markCommunicationFailed(const char *reason);
 
 	// Roboclaw protocol
 	int sendTransaction(Command cmd, uint8_t *write_buffer, size_t bytes_to_write);
@@ -132,13 +140,20 @@ private:
 	// UART handling
 	int initializeUART();
 	bool _uart_initialized{false};
-	int _uart_fd{0};
+	int _uart_fd{-1};
 	fd_set _uart_fd_set;
 	struct timeval _uart_fd_timeout;
+	hrt_abstime _last_encoder_read{0};
+	hrt_abstime _last_encoder_warn{0};
+	uint8_t _consecutive_encoder_failures{0};
+	uint16_t _esc_status_counter{0};
 
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::RBCLW_ADDRESS>) _param_rbclw_address,
 		(ParamInt<px4::params::RBCLW_COUNTS_REV>) _param_rbclw_counts_rev,
-		(ParamInt<px4::params::RBCLW_BAUD>) _param_rbclw_baud
+		(ParamInt<px4::params::RBCLW_BAUD>) _param_rbclw_baud,
+		(ParamInt<px4::params::RBCLW_VEL_CTRL>) _param_rbclw_vel_ctrl,
+		(ParamInt<px4::params::RBCLW_QPPS_MAX>) _param_rbclw_qpps_max,
+		(ParamInt<px4::params::RBCLW_ENC_HZ>) _param_rbclw_enc_hz
 	)
 };

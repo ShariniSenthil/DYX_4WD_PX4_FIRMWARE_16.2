@@ -74,6 +74,22 @@ parameters:
       max: 5.0
       unit: m/s
       decimal: 2
+    EKF2_GPS_YAW_N:
+      description:
+        short: Measurement noise floor for GNSS heading fusion
+        long: |
+          Minimum 1-sigma measurement noise used for dual-antenna GNSS
+          heading fusion. EKF2 uses the larger of the receiver-reported
+          heading accuracy and this value. Keep the default 0.1 rad until
+          receiver heading accuracy and EKF innovations are verified from
+          logs. Lowering this value increases GNSS-heading authority and can
+          increase the heading innovation test ratio.
+      type: float
+      default: 0.1
+      min: 0.001
+      max: 1.0
+      unit: rad
+      decimal: 4
     EKF2_GPS_POS_X:
       description:
         short: X position of GPS antenna in body frame

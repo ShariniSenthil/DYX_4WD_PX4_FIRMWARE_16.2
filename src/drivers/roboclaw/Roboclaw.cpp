@@ -43,6 +43,7 @@
 
 #include "Roboclaw.hpp"
 #include <termios.h>
+#include <math.h>
 
 Roboclaw::Roboclaw(const char *device_name, const char *bad_rate_parameter) :
 	OutputModuleInterface(MODULE_NAME, px4::wq_configurations::hp_default)
@@ -56,7 +57,9 @@ Roboclaw::Roboclaw(const char *device_name, const char *bad_rate_parameter) :
 
 Roboclaw::~Roboclaw()
 {
-	close(_uart_fd);
+	if (_uart_fd >= 0) {
+		close(_uart_fd);
+	}
 }
 
 int Roboclaw::initializeUART()
@@ -122,6 +125,19 @@ int Roboclaw::initializeUART()
 	uart_config.c_oflag &= ~ONLCR; // no CR for every LF
 	uart_config.c_cflag &= ~CRTSCTS;
 
+	// RoboClaw Packet Serial is a binary protocol. Disable terminal-layer
+	// translations, canonical processing, echo and software flow control.
+	uart_config.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+	uart_config.c_oflag &= ~OPOST;
+	uart_config.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+	uart_config.c_cflag &= ~(CSIZE | PARENB);
+	uart_config.c_cflag |= CS8 | CREAD | CLOCAL;
+
+	// readResponse() owns timeout handling with select(). Do not inherit a
+	// terminal-level byte-count or inter-byte timeout policy from the port.
+	uart_config.c_cc[VMIN] = 0;
+	uart_config.c_cc[VTIME] = 0;
+
 	// Set baud rate
 	ret = cfsetispeed(&uart_config, baud_rate_posix);
 
@@ -150,6 +166,8 @@ int Roboclaw::initializeUART()
 
 	} else {
 		PX4_INFO("Successfully connected");
+		_consecutive_encoder_failures = 0;
+		publishEscStatus(true);
 		return OK;
 	}
 }
@@ -161,16 +179,26 @@ bool Roboclaw::updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
 
 	if (_vehicle_status_sub.copy(&vehicle_status)) {
 		if (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER) {
-			setMotorSpeed(Motor::Right, 0.f);
-			setMotorSpeed(Motor::Left, 0.f);
-			return true;
+			const bool ok = (setMotorSpeed(Motor::Right, 0.f) == OK)
+					&& (setMotorSpeed(Motor::Left, 0.f) == OK);
+
+			if (!ok) {
+				markCommunicationFailed("RoboClaw stop command failed");
+			}
+
+			return ok;
 		}
 	}
 
 	if (stop_motors) {
-		setMotorSpeed(Motor::Right, 0.f);
-		setMotorSpeed(Motor::Left, 0.f);
-		return true;
+		const bool ok = (setMotorSpeed(Motor::Right, 0.f) == OK)
+				&& (setMotorSpeed(Motor::Left, 0.f) == OK);
+
+		if (!ok) {
+			markCommunicationFailed("RoboClaw stop command failed");
+		}
+
+		return ok;
 	}
 
 	// Verified rover mapping:
@@ -179,8 +207,13 @@ bool Roboclaw::updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
 	float right_motor_output = ((float)outputs[0] - 128.0f) / 127.f;
 	float left_motor_output = ((float)outputs[1] - 128.0f) / 127.f;
 
-	setMotorSpeed(Motor::Right, right_motor_output);
-	setMotorSpeed(Motor::Left, left_motor_output);
+	const bool right_ok = setMotorSpeed(Motor::Right, right_motor_output) == OK;
+	const bool left_ok = setMotorSpeed(Motor::Left, left_motor_output) == OK;
+
+	if (!right_ok || !left_ok) {
+		markCommunicationFailed("RoboClaw motor command failed");
+		return false;
+	}
 
 	return true;
 }
@@ -217,8 +250,40 @@ void Roboclaw::Run()
 	_actuator_armed_sub.update();
 	_mixing_output.updateSubscriptions(false);
 
-	// Wheel encoders are not used on this rover.
-	// Do not poll RoboClaw encoder counters.
+	// Rear encoders represent the right/left side speeds of the 4WD rover.
+	// Rate-limit serial polling so encoder telemetry cannot monopolize the
+	// RoboClaw UART/work queue. 0 Hz keeps polling disabled.
+	const int32_t encoder_rate_hz = _param_rbclw_enc_hz.get();
+
+	if (encoder_rate_hz > 0) {
+		const hrt_abstime now = hrt_absolute_time();
+		const uint32_t rate_hz = static_cast<uint32_t>(math::constrain(encoder_rate_hz, int32_t{1}, int32_t{100}));
+		const uint64_t interval_us = 1000000ULL / rate_hz;
+
+		if ((_last_encoder_read == 0) || (now - _last_encoder_read >= interval_us)) {
+			_last_encoder_read = now;
+
+			if (readEncoder() != OK) {
+				_consecutive_encoder_failures++;
+
+				if ((_last_encoder_warn == 0) || (now - _last_encoder_warn > 1000000ULL)) {
+					PX4_WARN("Rear encoder read failed");
+					_last_encoder_warn = now;
+				}
+
+				if (_consecutive_encoder_failures >= 3) {
+					markCommunicationFailed("RoboClaw encoder communication lost");
+					_consecutive_encoder_failures = 0;
+					ScheduleDelayed(100_ms);
+					return;
+				}
+
+			} else {
+				_consecutive_encoder_failures = 0;
+				publishEscStatus(true);
+			}
+		}
+	}
 }
 
 int Roboclaw::readEncoder()
@@ -226,9 +291,22 @@ int Roboclaw::readEncoder()
 	static constexpr int ENCODER_MESSAGE_SIZE = 10; // response size for ReadEncoderCounters
 	static constexpr int ENCODER_SPEED_MESSAGE_SIZE = 7; // response size for CMD_READ_SPEED_{1,2}
 
+	// Conversion cannot be valid with an unset/invalid counts-per-revolution value.
+	// Return ERROR and let the existing throttled driver warning report the failure.
+	const int32_t counts_rev = _param_rbclw_counts_rev.get();
+
+	if (counts_rev <= 0) {
+		return ERROR;
+	}
+
 	uint8_t buffer_positon[ENCODER_MESSAGE_SIZE];
 	uint8_t buffer_speed_right[ENCODER_SPEED_MESSAGE_SIZE];
 	uint8_t buffer_speed_left[ENCODER_SPEED_MESSAGE_SIZE];
+
+	// Commands 18 and 19 are sequential. Use the midpoint of the two speed
+	// transactions as the representative observation time. EKF2_WENC_DELAY
+	// remains available for any repeatable residual transport/filter delay.
+	const uint64_t speed_poll_start = hrt_absolute_time();
 
 	if (receiveTransaction(Command::ReadSpeedMotor1, buffer_speed_right,
 			       ENCODER_SPEED_MESSAGE_SIZE) < ENCODER_SPEED_MESSAGE_SIZE) {
@@ -240,6 +318,9 @@ int Roboclaw::readEncoder()
 		return ERROR;
 	}
 
+	const uint64_t speed_poll_end = hrt_absolute_time();
+	const uint64_t measurement_time = speed_poll_start + ((speed_poll_end - speed_poll_start) / 2);
+
 	if (receiveTransaction(Command::ReadEncoderCounters, buffer_positon, ENCODER_MESSAGE_SIZE) < ENCODER_MESSAGE_SIZE) {
 		return ERROR;
 	}
@@ -249,43 +330,60 @@ int Roboclaw::readEncoder()
 	int32_t position_right = swapBytesInt32(&buffer_positon[0]);
 	int32_t position_left = swapBytesInt32(&buffer_positon[4]);
 
+	const float counts_rev_f = static_cast<float>(counts_rev);
+
 	wheel_encoders_s wheel_encoders{};
-	wheel_encoders.wheel_speed[0] = static_cast<float>(speed_right) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.wheel_speed[1] = static_cast<float>(speed_left) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.wheel_angle[0] = static_cast<float>(position_right) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.wheel_angle[1] = static_cast<float>(position_left) / _param_rbclw_counts_rev.get() * M_TWOPI_F;
-	wheel_encoders.timestamp = hrt_absolute_time();
+	wheel_encoders.wheel_speed[0] = static_cast<float>(speed_right) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_speed[1] = static_cast<float>(speed_left) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_angle[0] = static_cast<float>(position_right) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_angle[1] = static_cast<float>(position_left) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.timestamp = measurement_time;
 	_wheel_encoders_pub.publish(wheel_encoders);
 
 	return OK;
 }
 
-void Roboclaw::setMotorSpeed(Motor motor, float value)
+int Roboclaw::setMotorSpeed(Motor motor, float value)
 {
-	Command command;
+	value = math::constrain(value, -1.f, 1.f);
 
-	// send command
-	if (motor == Motor::Right) {
-		if (value > 0) {
-			command = Command::DriveForwardMotor1;
-
-		} else {
-			command = Command::DriveBackwardsMotor1;
-		}
-
-	} else if (motor == Motor::Left) {
-		if (value > 0) {
-			command = Command::DriveForwardMotor2;
-
-		} else {
-			command = Command::DriveBackwardsMotor2;
-		}
-
-	} else {
-		return;
+	// Avoid commanding a real QPPS target for mixer quantization around zero.
+	if (fabsf(value) < 0.01f) {
+		value = 0.f;
 	}
 
-	sendUnsigned7Bit(command, value);
+	if (_param_rbclw_vel_ctrl.get() != 0) {
+		// Closed-loop side velocity control inside RoboClaw. The rear encoder on
+		// each side is the feedback sensor for the complete front+rear motor pair.
+		const int32_t qpps_max = math::max(_param_rbclw_qpps_max.get(), int32_t{0});
+		const int32_t qpps = (qpps_max > 0)
+				     ? static_cast<int32_t>(value * static_cast<float>(qpps_max))
+				     : 0;
+
+		if (motor == Motor::Right) {
+			return sendSigned32Bit(Command::DriveSpeedMotor1, qpps);
+
+		} else if (motor == Motor::Left) {
+			return sendSigned32Bit(Command::DriveSpeedMotor2, qpps);
+		}
+
+		return ERROR;
+	}
+
+	// Legacy open-loop path retained for instant rollback with RBCLW_VEL_CTRL=0.
+	Command command;
+
+	if (motor == Motor::Right) {
+		command = value > 0.f ? Command::DriveForwardMotor1 : Command::DriveBackwardsMotor1;
+
+	} else if (motor == Motor::Left) {
+		command = value > 0.f ? Command::DriveForwardMotor2 : Command::DriveBackwardsMotor2;
+
+	} else {
+		return ERROR;
+	}
+
+	return sendUnsigned7Bit(command, value);
 }
 
 void Roboclaw::setMotorDutyCycle(Motor motor, float value)
@@ -303,7 +401,7 @@ void Roboclaw::setMotorDutyCycle(Motor motor, float value)
 		return;
 	}
 
-	return sendSigned16Bit(command, value);
+	(void)sendSigned16Bit(command, value);
 }
 
 void Roboclaw::resetEncoders()
@@ -311,7 +409,7 @@ void Roboclaw::resetEncoders()
 	sendTransaction(Command::ResetEncoders, nullptr, 0);
 }
 
-void Roboclaw::sendUnsigned7Bit(Command command, float data)
+int Roboclaw::sendUnsigned7Bit(Command command, float data)
 {
 	data = fabs(data);
 
@@ -320,16 +418,58 @@ void Roboclaw::sendUnsigned7Bit(Command command, float data)
 	}
 
 	auto byte = (uint8_t)(data * INT8_MAX);
-	sendTransaction(command, &byte, 1);
+	return sendTransaction(command, &byte, 1);
 }
 
-void Roboclaw::sendSigned16Bit(Command command, float data)
+int Roboclaw::sendSigned16Bit(Command command, float data)
 {
 	int16_t value = math::constrain(data, -1.f, 1.f) * INT16_MAX;
 	uint8_t buff[2];
 	buff[0] = (value >> 8) & 0xFF; // High byte
 	buff[1] = value & 0xFF; // Low byte
-	sendTransaction(command, (uint8_t *) &buff, 2);
+	return sendTransaction(command, (uint8_t *) &buff, 2);
+}
+
+int Roboclaw::sendSigned32Bit(Command command, int32_t value)
+{
+	uint8_t buff[4];
+	buff[0] = (value >> 24) & 0xFF;
+	buff[1] = (value >> 16) & 0xFF;
+	buff[2] = (value >> 8) & 0xFF;
+	buff[3] = value & 0xFF;
+	return sendTransaction(command, buff, sizeof(buff));
+}
+
+
+void Roboclaw::publishEscStatus(bool online)
+{
+	esc_status_s status{};
+	status.timestamp = hrt_absolute_time();
+	status.counter = ++_esc_status_counter;
+	status.esc_count = 2;
+	status.esc_connectiontype = esc_status_s::ESC_CONNECTION_TYPE_SERIAL;
+	status.esc_online_flags = online ? 0x03 : 0x00;
+	status.esc_armed_flags = 0x03;
+
+	status.esc[0].timestamp = status.timestamp;
+	status.esc[0].esc_address = 1;
+	status.esc[1].timestamp = status.timestamp;
+	status.esc[1].esc_address = 2;
+
+	_esc_status_pub.publish(status);
+}
+
+void Roboclaw::markCommunicationFailed(const char *reason)
+{
+	PX4_ERR("%s", reason);
+	publishEscStatus(false);
+
+	if (_uart_fd >= 0) {
+		close(_uart_fd);
+		_uart_fd = -1;
+	}
+
+	_uart_initialized = false;
 }
 
 int Roboclaw::sendTransaction(Command cmd, uint8_t *write_buffer, size_t bytes_to_write)
@@ -374,7 +514,12 @@ int Roboclaw::writeCommandWithPayload(Command command, uint8_t *wbuff, size_t by
 
 int Roboclaw::readAcknowledgement()
 {
-	int select_status = select(_uart_fd + 1, &_uart_fd_set, nullptr, nullptr, &_uart_fd_timeout);
+	fd_set read_fds;
+	FD_ZERO(&read_fds);
+	FD_SET(_uart_fd, &read_fds);
+	struct timeval timeout = _uart_fd_timeout;
+
+	int select_status = select(_uart_fd + 1, &read_fds, nullptr, nullptr, &timeout);
 
 	if (select_status <= 0) {
 		PX4_ERR("ACK timeout");
@@ -424,7 +569,12 @@ int Roboclaw::readResponse(Command command, uint8_t *read_buffer, size_t bytes_t
 	size_t total_bytes_read = 0;
 
 	while (total_bytes_read < bytes_to_read) {
-		int select_status = select(_uart_fd + 1, &_uart_fd_set, nullptr, nullptr, &_uart_fd_timeout);
+		fd_set read_fds;
+		FD_ZERO(&read_fds);
+		FD_SET(_uart_fd, &read_fds);
+		struct timeval timeout = _uart_fd_timeout;
+
+		int select_status = select(_uart_fd + 1, &read_fds, nullptr, nullptr, &timeout);
 
 		if (select_status <= 0) {
 			PX4_ERR("Select timeout %d\n", select_status);
