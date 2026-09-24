@@ -126,9 +126,19 @@ void RoverDifferential::generateActuatorSetpoint()
 		_rover_steering_setpoint_sub.copy(&_rover_steering_setpoint);
 	}
 
+	// DYX: RO_ACCEL_LIM/RO_DECEL_LIM slew the motor command only in full manual
+	// mode. In closed-loop modes they already shape the speed setpoint in
+	// DifferentialVelControl; slewing the motor command as well delayed every
+	// stop (and e-stop) by seconds.
+	const bool full_manual_mode_enabled = _vehicle_control_mode.flag_control_manual_enabled
+					      && !_vehicle_control_mode.flag_control_position_enabled && !_vehicle_control_mode.flag_control_attitude_enabled
+					      && !_vehicle_control_mode.flag_control_rates_enabled;
+	const float accel_limit = full_manual_mode_enabled ? _param_ro_accel_limit.get() : -1.f;
+	const float decel_limit = full_manual_mode_enabled ? _param_ro_decel_limit.get() : -1.f;
+
 	const float throttle_body_x = RoverControl::throttleControl(_throttle_body_x_setpoint,
-				      _rover_throttle_setpoint.throttle_body_x, _current_throttle_body_x, _param_ro_accel_limit.get(),
-				      _param_ro_decel_limit.get(), _param_ro_max_thr_speed.get(), _dt);
+				      _rover_throttle_setpoint.throttle_body_x, _current_throttle_body_x, accel_limit,
+				      decel_limit, _param_ro_max_thr_speed.get(), _dt);
 	actuator_motors_s actuator_motors{};
 	actuator_motors.reversible_flags = _param_r_rev.get();
 	computeInverseKinematics(throttle_body_x,

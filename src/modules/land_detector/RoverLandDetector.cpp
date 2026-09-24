@@ -64,7 +64,9 @@ bool RoverLandDetector::_get_landed_state()
 		return true; // If the rover reaches the home position during RTL we say we have landed.
 
 	} else {
-		return !_armed;  // If we are armed we are not landed.
+		// Preserve PX4 rover landed-state semantics: armed means active/not landed.
+		// Wheel-motion tracking below remains available for rover health logic.
+		return !_armed;
 	}
 }
 
@@ -80,6 +82,17 @@ void RoverLandDetector::_update_topics()
 		home_position_s home_position{};
 		_home_position_sub.copy(&home_position);
 		_home_position = matrix::Vector2d(home_position.lat, home_position.lon);
+	}
+
+	wheel_encoders_s wheel_encoders{};
+
+	if (_wheel_encoders_sub.update(&wheel_encoders)) {
+		static constexpr float WHEEL_MOVING_THRESHOLD_RAD_S = 0.05f;
+
+		if ((fabsf(wheel_encoders.wheel_speed[0]) > WHEEL_MOVING_THRESHOLD_RAD_S)
+		    || (fabsf(wheel_encoders.wheel_speed[1]) > WHEEL_MOVING_THRESHOLD_RAD_S)) {
+			_mark_movement_detected(wheel_encoders.timestamp);
+		}
 	}
 }
 

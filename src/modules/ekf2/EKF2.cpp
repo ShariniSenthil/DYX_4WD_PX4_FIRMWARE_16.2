@@ -70,6 +70,17 @@ EKF2::EKF2(bool multi_mode, const px4::wq_config_t &config, bool replay_mode):
 #if defined(CONFIG_EKF2_AUXVEL)
 	_param_ekf2_avel_delay(_params->auxvel_delay_ms),
 #endif // CONFIG_EKF2_AUXVEL
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	_param_ekf2_wenc_ctrl(_params->wenc_ctrl),
+	_param_ekf2_wenc_rad(_params->wenc_rad),
+	_param_ekf2_wenc_delay(_params->wenc_delay_ms),
+	_param_ekf2_wenc_noise(_params->wenc_noise),
+	_param_ekf2_wenc_gate(_params->wenc_gate),
+	_param_ekf2_wenc_tout(_params->wenc_timeout_ms),
+	_param_ekf2_wenc_pos_x(_params->wenc_pos_body(0)),
+	_param_ekf2_wenc_pos_y(_params->wenc_pos_body(1)),
+	_param_ekf2_wenc_pos_z(_params->wenc_pos_body(2)),
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 	_param_ekf2_gyr_noise(_params->gyro_noise),
 	_param_ekf2_acc_noise(_params->accel_noise),
 	_param_ekf2_gyr_b_noise(_params->gyro_bias_p_noise),
@@ -86,6 +97,9 @@ EKF2::EKF2(bool multi_mode, const px4::wq_config_t &config, bool replay_mode):
 	_param_ekf2_gps_pos_z(_params->gps_pos_body(2)),
 	_param_ekf2_gps_v_noise(_params->gps_vel_noise),
 	_param_ekf2_gps_p_noise(_params->gps_pos_noise),
+#if defined(CONFIG_EKF2_GNSS_YAW)
+	_param_ekf2_gps_yaw_n(_params->gnss_heading_noise),
+#endif // CONFIG_EKF2_GNSS_YAW
 	_param_ekf2_gps_p_gate(_params->gps_pos_innov_gate),
 	_param_ekf2_gps_v_gate(_params->gps_vel_innov_gate),
 	_param_ekf2_gps_check(_params->gps_check_mask),
@@ -752,6 +766,7 @@ void EKF2::Run()
 			.vehicle_air_data_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
 			.vehicle_magnetometer_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
 			.visual_odometry_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
+			.wheel_encoders_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID,
 		};
 
 #if defined(CONFIG_EKF2_AIRSPEED)
@@ -760,6 +775,9 @@ void EKF2::Run()
 #if defined(CONFIG_EKF2_AUXVEL)
 		UpdateAuxVelSample(ekf2_timestamps);
 #endif // CONFIG_EKF2_AUXVEL
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+		UpdateWheelEncoderSample(ekf2_timestamps);
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 #if defined(CONFIG_EKF2_BAROMETER)
 		UpdateBaroSample(ekf2_timestamps);
 #endif // CONFIG_EKF2_BAROMETER
@@ -878,6 +896,14 @@ void EKF2::VerifyParams()
 	}
 
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+
+	if (_param_ekf2_wenc_delay.get() > delay_max) {
+		delay_max = _param_ekf2_wenc_delay.get();
+	}
+
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 #if defined(CONFIG_EKF2_BAROMETER)
 
@@ -1007,6 +1033,11 @@ void EKF2::PublishAidSourceStatus(const hrt_abstime &timestamp)
 	// aux velocity
 	PublishAidSourceStatus(_ekf.aid_src_aux_vel(), _status_aux_vel_pub_last, _estimator_aid_src_aux_vel_pub);
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	PublishAidSourceStatus(_ekf.aid_src_wheel_encoder(), _status_wheel_encoder_pub_last,
+			       _estimator_aid_src_wheel_encoder_pub);
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 #if defined(CONFIG_EKF2_OPTICAL_FLOW)
 	// optical flow
@@ -2138,6 +2169,57 @@ void EKF2::UpdateAuxVelSample(ekf2_timestamps_s &ekf2_timestamps)
 	}
 }
 #endif // CONFIG_EKF2_AUXVEL
+
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+void EKF2::UpdateWheelEncoderSample(ekf2_timestamps_s &ekf2_timestamps)
+{
+	const float radius = _param_ekf2_wenc_rad.get();
+
+	if ((_param_ekf2_wenc_ctrl.get() == 0) || !PX4_ISFINITE(radius) || !(radius > 0.f)) {
+		return;
+	}
+
+	wheel_encoders_s wheel_encoders{};
+
+	if (_wheel_encoders_sub.update(&wheel_encoders)) {
+		const float speed_right = wheel_encoders.wheel_speed[0];
+		const float speed_left = wheel_encoders.wheel_speed[1];
+
+		if (!PX4_ISFINITE(speed_right) || !PX4_ISFINITE(speed_left) || wheel_encoders.timestamp == 0) {
+			return;
+		}
+
+		// Do not insert an already-stale uORB sample into the EKF observation
+		// buffer. The same timeout controls fusion lifecycle inside the EKF.
+		const uint64_t now = hrt_absolute_time();
+		const uint64_t timeout_us =
+			static_cast<uint64_t>(math::max(_param_ekf2_wenc_tout.get(), 100.f) * 1000.f);
+
+		if ((wheel_encoders.timestamp > now) || ((now - wheel_encoders.timestamp) > timeout_us)) {
+			return;
+		}
+
+		const float v_fwd = 0.5f * (speed_right + speed_left) * radius;
+
+		if (!PX4_ISFINITE(v_fwd)) {
+			return;
+		}
+
+		wheelEncoderSample sample{
+			.time_us = wheel_encoders.timestamp,
+			.vel_body_fwd = v_fwd,
+			.vel_fwd_var = sq(math::max(_param_ekf2_wenc_noise.get(), 0.01f)),
+		};
+
+		// Record the exact wheel observation time used by live EKF2 so replay can
+		// republish wheel_encoders at the same point on the EKF fusion timeline.
+		ekf2_timestamps.wheel_encoders_timestamp_rel = (int16_t)((int64_t)wheel_encoders.timestamp / 100 -
+				(int64_t)ekf2_timestamps.timestamp / 100);
+
+		_ekf.setWheelEncoderData(sample);
+	}
+}
+#endif // CONFIG_EKF2_WHEEL_ENCODER
 
 #if defined(CONFIG_EKF2_BAROMETER)
 void EKF2::UpdateBaroSample(ekf2_timestamps_s &ekf2_timestamps)
