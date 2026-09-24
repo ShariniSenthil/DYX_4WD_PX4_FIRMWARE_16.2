@@ -133,6 +133,7 @@ void DifferentialVelControl::generateVelocitySetpoint()
 
 		if (travel_speed < stationary_yaw_speed_threshold) {
 			differential_velocity_setpoint.speed = 0.f;
+
 		} else {
 			differential_velocity_setpoint.speed = travel_speed;
 		}

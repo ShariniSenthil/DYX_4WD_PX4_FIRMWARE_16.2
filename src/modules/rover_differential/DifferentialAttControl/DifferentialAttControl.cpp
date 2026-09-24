@@ -204,8 +204,8 @@ void DifferentialAttControl::generateRateSetpoint()
 			const bool stationary = velocity_setpoint.isAllFinite()
 						&& velocity_setpoint.norm() < stationary_yaw_speed_threshold;
 			const bool trajectory_setpoint_fresh = trajectory_setpoint.timestamp > 0
-						&& _timestamp >= trajectory_setpoint.timestamp
-						&& (_timestamp - trajectory_setpoint.timestamp) < 500_ms;
+							       && _timestamp >= trajectory_setpoint.timestamp
+							       && (_timestamp - trajectory_setpoint.timestamp) < 500_ms;
 
 			if (stationary && trajectory_setpoint_fresh
 			    && PX4_ISFINITE(trajectory_setpoint.yaw) && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
