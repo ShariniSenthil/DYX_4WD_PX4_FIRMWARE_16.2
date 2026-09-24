@@ -191,6 +191,7 @@ void DifferentialAttControl::generateRateSetpoint()
 	// NaN means no Jetson pivot-speed override and RO_YAW_RATE_LIM is used.
 	// Zero explicitly pauses the pivot. Any nonzero requested magnitude is
 	// capped by RO_YAW_RATE_LIM, which remains the FCU hard safety ceiling.
+	// A stationary setpoint older than 500 ms also pauses the pivot.
 	float commanded_yaw_rate_limit = _max_yaw_rate;
 	bool pause_offboard_pivot = false;
 
@@ -207,8 +208,16 @@ void DifferentialAttControl::generateRateSetpoint()
 							       && _timestamp >= trajectory_setpoint.timestamp
 							       && (_timestamp - trajectory_setpoint.timestamp) < 500_ms;
 
-			if (stationary && trajectory_setpoint_fresh
-			    && PX4_ISFINITE(trajectory_setpoint.yaw) && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
+			if (stationary && !trajectory_setpoint_fresh) {
+				// Stream loss while stationary (Jetson/MAVROS stalled, OFFBOARD
+				// loss not yet declared): do not keep turning toward the last
+				// yaw target at RO_YAW_RATE_LIM. Hold the current heading until
+				// a fresh command arrives or the OFFBOARD failsafe takes over.
+				pause_offboard_pivot = true;
+
+			} else if (stationary && trajectory_setpoint_fresh
+				   && PX4_ISFINITE(trajectory_setpoint.yaw)
+				   && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
 				const float requested_pivot_rate = fabsf(trajectory_setpoint.yawspeed);
 
 				if (requested_pivot_rate <= FLT_EPSILON) {
@@ -224,7 +233,7 @@ void DifferentialAttControl::generateRateSetpoint()
 	float yaw_rate_setpoint = 0.f;
 
 	if (pause_offboard_pivot) {
-		// A zero OFFBOARD yawspeed explicitly pauses the pivot. Keep the
+		// A zero or stale stationary OFFBOARD command pauses the pivot. Keep the
 		// internal yaw slew state at the measured yaw so a later nonzero
 		// command resumes smoothly from the current heading.
 		_adjusted_yaw_setpoint.setForcedValue(_vehicle_yaw);
