@@ -124,6 +124,7 @@ private:
 	int sendSigned32Bit(Command command, int32_t value);
 	void publishEscStatus(bool online);
 	void markCommunicationFailed(const char *reason);
+	void checkVelocityControlConfig();
 
 	// Roboclaw protocol
 	int sendTransaction(Command cmd, uint8_t *write_buffer, size_t bytes_to_write);
@@ -147,6 +148,8 @@ private:
 	hrt_abstime _last_encoder_warn{0};
 	uint8_t _consecutive_encoder_failures{0};
 	uint16_t _esc_status_counter{0};
+	bool _vel_ctrl_config_invalid{false};
+	bool _vel_ctrl_config_checked{false};
 
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::RBCLW_ADDRESS>) _param_rbclw_address,
