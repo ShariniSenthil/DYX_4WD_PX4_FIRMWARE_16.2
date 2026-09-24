@@ -116,7 +116,7 @@ void DifferentialRateControl::generateRateAndThrottleSetpoint()
 			_rover_rate_setpoint_pub.publish(rover_rate_setpoint);
 		}
 
-	} else if (_vehicle_control_mode.flag_control_offboard_enabled) {
+	} else if (_vehicle_control_mode.flag_control_offboard_enabled) { // Offboard rate control
 		trajectory_setpoint_s trajectory_setpoint{};
 		_trajectory_setpoint_sub.copy(&trajectory_setpoint);
 
@@ -126,18 +126,11 @@ void DifferentialRateControl::generateRateAndThrottleSetpoint()
 
 		const bool offboard_rate_control = _offboard_control_mode.body_rate && !_offboard_control_mode.position
 						   && !_offboard_control_mode.velocity && !_offboard_control_mode.attitude;
-		const bool offboard_speed_yaw_rate_control = _offboard_control_mode.velocity
-				&& !_offboard_control_mode.position
-				&& !_offboard_control_mode.attitude
-				&& PX4_ISFINITE(trajectory_setpoint.yaw)
-				&& PX4_ISFINITE(trajectory_setpoint.yawspeed);
 
-		if ((offboard_rate_control || offboard_speed_yaw_rate_control)
-		    && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
+		if (offboard_rate_control && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
 			rover_rate_setpoint_s rover_rate_setpoint{};
 			rover_rate_setpoint.timestamp = _timestamp;
-			rover_rate_setpoint.yaw_rate_setpoint =
-				math::constrain(trajectory_setpoint.yawspeed, -_max_yaw_rate, _max_yaw_rate);
+			rover_rate_setpoint.yaw_rate_setpoint = trajectory_setpoint.yawspeed;
 			_rover_rate_setpoint_pub.publish(rover_rate_setpoint);
 		}
 	}
