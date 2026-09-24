@@ -133,16 +133,21 @@ void DifferentialVelControl::generateVelocitySetpoint()
 		const bool offboard_speed_yaw_rate_control =
 			PX4_ISFINITE(trajectory_setpoint.yaw) && PX4_ISFINITE(trajectory_setpoint.yawspeed);
 
-		differential_velocity_setpoint.speed =
-			travel_speed < stationary_yaw_speed_threshold ? 0.f : travel_speed;
-
 		if (offboard_speed_yaw_rate_control) {
-			// Jetson owns the motion plan. Keep the Jetson absolute yaw target
-			// available in PX4 for target-state/telemetry, but do not let the
-			// velocity controller derive steering from yaw error.
-			differential_velocity_setpoint.bearing = matrix::wrap_pi(trajectory_setpoint.yaw);
+			// Jetson full authority, including reverse. The velocity vector
+			// carries signed longitudinal speed while yaw carries body heading.
+			const float commanded_yaw = matrix::wrap_pi(trajectory_setpoint.yaw);
+			const Vector2f heading_unit(cosf(commanded_yaw), sinf(commanded_yaw));
+			const float signed_travel_speed = velocity_in_local_frame.dot(heading_unit);
+
+			differential_velocity_setpoint.speed =
+				fabsf(signed_travel_speed) < stationary_yaw_speed_threshold
+				? 0.f
+				: signed_travel_speed;
+			differential_velocity_setpoint.bearing = commanded_yaw;
 
 		} else if (travel_speed >= stationary_yaw_speed_threshold) {
+			differential_velocity_setpoint.speed = travel_speed;
 			// Native PX4 v1.16.2 velocity-vector steering outside the
 			// Jetson full-authority speed + yaw + yaw-rate contract.
 			differential_velocity_setpoint.bearing =
@@ -150,6 +155,7 @@ void DifferentialVelControl::generateVelocitySetpoint()
 
 		} else {
 			// Zero velocity with no full-authority command: hold current yaw.
+			differential_velocity_setpoint.speed = 0.f;
 			differential_velocity_setpoint.bearing = _vehicle_yaw;
 		}
 
