@@ -12,10 +12,23 @@ void Ekf::controlWheelEncoderFusion(const imuSample &imu_sample)
 
 	// Wheel aiding is secondary only. Disabling the source, invalid radius, or
 	// loss of the primary horizontal solution stops wheel fusion without any
-	// navigation-state reset.
-	if ((_params.wenc_ctrl == 0) || !PX4_ISFINITE(_params.wenc_rad) || !(_params.wenc_rad > 0.f)
-	    || !isHorizontalAidingActive()) {
+	// navigation-state reset. When horizontal aiding is lost, discard wheel
+	// observations up to the current fusion horizon so they cannot be replayed
+	// after GNSS/primary horizontal aiding returns.
+	if ((_params.wenc_ctrl == 0) || !PX4_ISFINITE(_params.wenc_rad) || !(_params.wenc_rad > 0.f)) {
 		stopWheelEncoderFusion();
+		return;
+	}
+
+	if (!isHorizontalAidingActive()) {
+		stopWheelEncoderFusion();
+
+		if (_wheel_encoder_buffer != nullptr) {
+			wheelEncoderSample discarded_sample;
+
+			while (_wheel_encoder_buffer->pop_first_older_than(imu_sample.time_us, &discarded_sample)) {}
+		}
+
 		return;
 	}
 
@@ -33,6 +46,13 @@ void Ekf::controlWheelEncoderFusion(const imuSample &imu_sample)
 	wheelEncoderSample sample;
 
 	if (!_wheel_encoder_buffer->pop_first_older_than(imu_sample.time_us, &sample)) {
+		return;
+	}
+
+	// Never fuse a wheel observation that has aged beyond the wheel-aiding
+	// timeout at the delayed EKF fusion horizon.
+	if ((imu_sample.time_us > sample.time_us)
+	    && ((imu_sample.time_us - sample.time_us) > timeout_us)) {
 		return;
 	}
 

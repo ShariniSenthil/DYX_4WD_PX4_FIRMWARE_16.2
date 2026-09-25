@@ -462,6 +462,10 @@ void EstimatorInterface::setWheelEncoderData(const wheelEncoderSample &wheel_enc
 				- static_cast<int64_t>(_params.wenc_delay_ms * 1000)
 				- static_cast<int64_t>(_dt_ekf_avg * 5e5f);
 
+	if (time_us <= 0) {
+		return;
+	}
+
 	if (time_us >= static_cast<int64_t>(_wheel_encoder_buffer->get_newest().time_us + _min_obs_interval_us)) {
 		wheelEncoderSample sample_new{wheel_encoder_sample};
 		sample_new.time_us = time_us;

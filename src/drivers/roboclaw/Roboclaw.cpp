@@ -325,16 +325,29 @@ int Roboclaw::readEncoder()
 		return ERROR;
 	}
 
-	int32_t speed_right = swapBytesInt32(&buffer_speed_right[0]);
-	int32_t speed_left = swapBytesInt32(&buffer_speed_left[0]);
+	// RoboClaw commands 18/19 return an unsigned speed magnitude followed by
+	// a direction status byte (0 = forward, 1 = backward). Do not interpret
+	// the four speed bytes themselves as a signed two's-complement value.
+	const uint32_t speed_right_mag =
+		(static_cast<uint32_t>(buffer_speed_right[0]) << 24)
+		| (static_cast<uint32_t>(buffer_speed_right[1]) << 16)
+		| (static_cast<uint32_t>(buffer_speed_right[2]) << 8)
+		| static_cast<uint32_t>(buffer_speed_right[3]);
+	const uint32_t speed_left_mag =
+		(static_cast<uint32_t>(buffer_speed_left[0]) << 24)
+		| (static_cast<uint32_t>(buffer_speed_left[1]) << 16)
+		| (static_cast<uint32_t>(buffer_speed_left[2]) << 8)
+		| static_cast<uint32_t>(buffer_speed_left[3]);
+	const float speed_right = (buffer_speed_right[4] != 0u) ? -static_cast<float>(speed_right_mag) : static_cast<float>(speed_right_mag);
+	const float speed_left = (buffer_speed_left[4] != 0u) ? -static_cast<float>(speed_left_mag) : static_cast<float>(speed_left_mag);
 	int32_t position_right = swapBytesInt32(&buffer_positon[0]);
 	int32_t position_left = swapBytesInt32(&buffer_positon[4]);
 
 	const float counts_rev_f = static_cast<float>(counts_rev);
 
 	wheel_encoders_s wheel_encoders{};
-	wheel_encoders.wheel_speed[0] = static_cast<float>(speed_right) / counts_rev_f * M_TWOPI_F;
-	wheel_encoders.wheel_speed[1] = static_cast<float>(speed_left) / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_speed[0] = speed_right / counts_rev_f * M_TWOPI_F;
+	wheel_encoders.wheel_speed[1] = speed_left / counts_rev_f * M_TWOPI_F;
 	wheel_encoders.wheel_angle[0] = static_cast<float>(position_right) / counts_rev_f * M_TWOPI_F;
 	wheel_encoders.wheel_angle[1] = static_cast<float>(position_left) / counts_rev_f * M_TWOPI_F;
 	wheel_encoders.timestamp = measurement_time;
@@ -634,10 +647,12 @@ uint16_t Roboclaw::_calcCRC(const uint8_t *buffer, size_t bytes, uint16_t init)
 
 int32_t Roboclaw::swapBytesInt32(uint8_t *buffer)
 {
-	return (buffer[0] << 24)
-	       | (buffer[1] << 16)
-	       | (buffer[2] << 8)
-	       | buffer[3];
+	const uint32_t value = (static_cast<uint32_t>(buffer[0]) << 24)
+			       | (static_cast<uint32_t>(buffer[1]) << 16)
+			       | (static_cast<uint32_t>(buffer[2]) << 8)
+			       | static_cast<uint32_t>(buffer[3]);
+
+	return static_cast<int32_t>(value);
 }
 
 int Roboclaw::task_spawn(int argc, char *argv[])
