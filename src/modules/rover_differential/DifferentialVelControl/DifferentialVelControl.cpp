@@ -144,6 +144,22 @@ void DifferentialVelControl::generateVelocitySetpoint()
 			// - moving: speed comes from velocity magnitude, bearing comes from yaw
 			differential_velocity_setpoint.bearing = matrix::wrap_pi(trajectory_setpoint.yaw);
 
+			// DYX: signed speed for the Jetson reverse-arc pivot (RD_OFFB_REV).
+			// A velocity pointing backward along the explicit yaw -- within
+			// kReverseConeRad of anti-parallel -- drives in reverse at the
+			// signed projection of the velocity onto the yaw heading, while the
+			// yaw target keeps full steering authority. Every other command,
+			// including any velocity merely rotated away from the yaw, keeps the
+			// forward-only |v| behaviour above.
+			if (_param_rd_offb_rev.get() && travel_speed >= stationary_yaw_speed_threshold) {
+				const float bearing = differential_velocity_setpoint.bearing;
+				const float along_yaw = velocity_in_local_frame * Vector2f(cosf(bearing), sinf(bearing));
+
+				if (along_yaw < -travel_speed * cosf(kReverseConeRad)) {
+					differential_velocity_setpoint.speed = along_yaw;
+				}
+			}
+
 		} else if (travel_speed >= stationary_yaw_speed_threshold) {
 			// Backward-compatible velocity-vector steering when yaw is ignored.
 			differential_velocity_setpoint.bearing =
