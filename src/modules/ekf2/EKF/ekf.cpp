@@ -93,6 +93,11 @@ void Ekf::reset()
 	_fault_status.value = 0;
 	_innov_check_fail_status.value = 0;
 
+#if defined(CONFIG_EKF2_WHEEL_ENCODER)
+	_wheel_encoder_fusion_active = false;
+	_aid_src_wheel_encoder = {};
+#endif // CONFIG_EKF2_WHEEL_ENCODER
+
 #if defined(CONFIG_EKF2_GNSS)
 	resetGpsDriftCheckFilters();
 	_gps_checks_passed = false;

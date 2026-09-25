@@ -129,19 +129,45 @@ void DifferentialVelControl::generateVelocitySetpoint()
 		differential_velocity_setpoint.timestamp = _timestamp;
 
 		const float travel_speed = velocity_in_local_frame.norm();
+		constexpr float stationary_yaw_speed_threshold = 0.01f;
 
-		if (travel_speed < FLT_EPSILON) {
-			// P4 only:
-			// A zero velocity vector has no valid travel bearing. Retain
-			// the current rover yaw so a zero command cannot request a
-			// stale-bearing or North-facing pivot.
+		if (travel_speed < stationary_yaw_speed_threshold) {
 			differential_velocity_setpoint.speed = 0.f;
-			differential_velocity_setpoint.bearing = _vehicle_yaw;
 
 		} else {
-			// Default PX4 v1.16.2 behavior for every nonzero vector.
 			differential_velocity_setpoint.speed = travel_speed;
-			differential_velocity_setpoint.bearing = atan2f(velocity_in_local_frame(1), velocity_in_local_frame(0));
+		}
+
+		if (PX4_ISFINITE(trajectory_setpoint.yaw)) {
+			// Explicit offboard yaw has steering authority at any speed:
+			// - stationary: absolute-yaw differential pivot
+			// - moving: speed comes from velocity magnitude, bearing comes from yaw
+			differential_velocity_setpoint.bearing = matrix::wrap_pi(trajectory_setpoint.yaw);
+
+			// DYX: signed speed for the Jetson reverse-arc pivot (RD_OFFB_REV).
+			// A velocity pointing backward along the explicit yaw -- within
+			// kReverseConeRad of anti-parallel -- drives in reverse at the
+			// signed projection of the velocity onto the yaw heading, while the
+			// yaw target keeps full steering authority. Every other command,
+			// including any velocity merely rotated away from the yaw, keeps the
+			// forward-only |v| behaviour above.
+			if (_param_rd_offb_rev.get() && travel_speed >= stationary_yaw_speed_threshold) {
+				const float bearing = differential_velocity_setpoint.bearing;
+				const float along_yaw = velocity_in_local_frame * Vector2f(cosf(bearing), sinf(bearing));
+
+				if (along_yaw < -travel_speed * cosf(kReverseConeRad)) {
+					differential_velocity_setpoint.speed = along_yaw;
+				}
+			}
+
+		} else if (travel_speed >= stationary_yaw_speed_threshold) {
+			// Backward-compatible velocity-vector steering when yaw is ignored.
+			differential_velocity_setpoint.bearing =
+				atan2f(velocity_in_local_frame(1), velocity_in_local_frame(0));
+
+		} else {
+			// Normal zero-velocity stop with yaw ignored: hold current heading.
+			differential_velocity_setpoint.bearing = _vehicle_yaw;
 		}
 
 		_differential_velocity_setpoint_pub.publish(differential_velocity_setpoint);
@@ -191,10 +217,15 @@ void DifferentialVelControl::generateAttitudeAndThrottleSetpoint()
 		}
 	}
 
+	// DYX: a zero speed target (stop, spot turn, e-stop) is never slewed by
+	// RO_DECEL_LIM, so stopping stays as fast as the drivetrain allows. The
+	// limits still shape acceleration and non-zero speed changes.
+	const float decel_limit = fabsf(speed_body_x_setpoint) > FLT_EPSILON ? _param_ro_decel_limit.get() : -1.f;
+
 	rover_throttle_setpoint_s rover_throttle_setpoint{};
 	rover_throttle_setpoint.timestamp = _timestamp;
 	rover_throttle_setpoint.throttle_body_x = RoverControl::speedControl(_speed_setpoint, _pid_speed,
-			speed_body_x_setpoint, _vehicle_speed_body_x, _param_ro_accel_limit.get(), _param_ro_decel_limit.get(),
+			speed_body_x_setpoint, _vehicle_speed_body_x, _param_ro_accel_limit.get(), decel_limit,
 			_param_ro_max_thr_speed.get(), _dt);
 	rover_throttle_setpoint.throttle_body_y = 0.f;
 	_rover_throttle_setpoint_pub.publish(rover_throttle_setpoint);

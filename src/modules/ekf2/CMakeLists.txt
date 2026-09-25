@@ -150,6 +150,11 @@ if(CONFIG_EKF2_AUXVEL)
 	list(APPEND EKF_MODULE_PARAMS params_aux_velocity.yaml)
 endif()
 
+if(CONFIG_EKF2_WHEEL_ENCODER)
+	list(APPEND EKF_SRCS EKF/aid_sources/wheel_encoder/wheel_encoder_fusion.cpp)
+	list(APPEND EKF_MODULE_PARAMS params_wheel_encoder.yaml)
+endif()
+
 if(CONFIG_EKF2_BAROMETER)
 	list(APPEND EKF_SRCS EKF/aid_sources/barometer/baro_height_control.cpp)
 	list(APPEND EKF_MODULE_PARAMS params_barometer.yaml)

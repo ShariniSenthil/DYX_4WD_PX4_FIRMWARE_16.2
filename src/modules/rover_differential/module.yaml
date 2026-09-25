@@ -62,6 +62,20 @@ parameters:
         decimal: 3
         default: 0.174533
 
+      RD_OFFB_REV:
+        description:
+          short: Allow OFFBOARD reverse along an explicit yaw
+          long: |
+            DYX. In OFFBOARD velocity mode with a finite trajectory_setpoint.yaw,
+            a velocity within 10 degrees of the opposite of that yaw drives the
+            rover in reverse at the velocity's signed projection onto the yaw
+            heading, while the yaw target keeps steering. Used by the Jetson
+            reverse-arc pivot. Disabled: every OFFBOARD velocity drives forward
+            at its magnitude (previous behaviour). The spot-turn state machine
+            (RD_TRANS_DRV_TRN) still zeroes speed whenever the yaw error exceeds it.
+        type: boolean
+        default: 0
+
       RD_MISS_SPD_GAIN:
         description:
           short: Tuning parameter for the speed reduction during waypoint transition

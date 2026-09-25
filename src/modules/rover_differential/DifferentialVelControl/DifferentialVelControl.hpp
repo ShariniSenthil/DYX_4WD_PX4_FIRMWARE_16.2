@@ -149,6 +149,10 @@ private:
 	PID _pid_speed;
 	SlewRate<float> _speed_setpoint;
 
+	// Max angle between the OFFBOARD velocity and the reversed explicit yaw for
+	// the velocity to be treated as a reverse command (RD_OFFB_REV).
+	static constexpr float kReverseConeRad = 10.f * M_DEG_TO_RAD_F;
+
 	DEFINE_PARAMETERS(
 		(ParamFloat<px4::params::RD_TRANS_TRN_DRV>) _param_rd_trans_trn_drv,
 		(ParamFloat<px4::params::RD_TRANS_DRV_TRN>) _param_rd_trans_drv_trn,
@@ -159,7 +163,8 @@ private:
 		(ParamFloat<px4::params::RO_DECEL_LIM>)     _param_ro_decel_limit,
 		(ParamFloat<px4::params::RO_JERK_LIM>)      _param_ro_jerk_limit,
 		(ParamFloat<px4::params::RO_SPEED_LIM>)     _param_ro_speed_limit,
-		(ParamFloat<px4::params::RO_SPEED_TH>)      _param_ro_speed_th
+		(ParamFloat<px4::params::RO_SPEED_TH>)      _param_ro_speed_th,
+		(ParamBool<px4::params::RD_OFFB_REV>)       _param_rd_offb_rev
 
 	)
 };
