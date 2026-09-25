@@ -436,20 +436,24 @@ int Roboclaw::sendUnsigned7Bit(Command command, float data)
 
 int Roboclaw::sendSigned16Bit(Command command, float data)
 {
-	int16_t value = math::constrain(data, -1.f, 1.f) * INT16_MAX;
+	const int16_t value = static_cast<int16_t>(math::constrain(data, -1.f, 1.f) * INT16_MAX);
+	const uint16_t encoded = static_cast<uint16_t>(value);
 	uint8_t buff[2];
-	buff[0] = (value >> 8) & 0xFF; // High byte
-	buff[1] = value & 0xFF; // Low byte
+	buff[0] = static_cast<uint8_t>((encoded >> 8) & 0xFFu); // High byte
+	buff[1] = static_cast<uint8_t>(encoded & 0xFFu); // Low byte
 	return sendTransaction(command, (uint8_t *) &buff, 2);
 }
 
 int Roboclaw::sendSigned32Bit(Command command, int32_t value)
 {
+	// Convert to the corresponding unsigned bit pattern before shifting.
+	// This avoids implementation-defined right shifts of negative signed values.
+	const uint32_t encoded = static_cast<uint32_t>(value);
 	uint8_t buff[4];
-	buff[0] = (value >> 24) & 0xFF;
-	buff[1] = (value >> 16) & 0xFF;
-	buff[2] = (value >> 8) & 0xFF;
-	buff[3] = value & 0xFF;
+	buff[0] = static_cast<uint8_t>((encoded >> 24) & 0xFFu);
+	buff[1] = static_cast<uint8_t>((encoded >> 16) & 0xFFu);
+	buff[2] = static_cast<uint8_t>((encoded >> 8) & 0xFFu);
+	buff[3] = static_cast<uint8_t>(encoded & 0xFFu);
 	return sendTransaction(command, buff, sizeof(buff));
 }
 
@@ -514,11 +518,12 @@ int Roboclaw::writeCommandWithPayload(Command command, uint8_t *wbuff, size_t by
 	buffer[packet_size - 1] = sum & 0xFFu;
 
 	// Write to device
-	size_t bytes_written = write(_uart_fd, buffer, packet_size);
+	const ssize_t bytes_written = write(_uart_fd, buffer, packet_size);
 
-	// Not all bytes sent
-	if (bytes_written < packet_size) {
-		PX4_ERR("Only wrote %d out of %d bytes", bytes_written, bytes_to_write);
+	// write() can return -1 on failure or a positive short write.
+	if (bytes_written != static_cast<ssize_t>(packet_size)) {
+		PX4_ERR("RoboClaw write failed: %d/%d bytes",
+			static_cast<int>(bytes_written), static_cast<int>(packet_size));
 		return ERROR;
 	}
 
@@ -567,10 +572,11 @@ int Roboclaw::writeCommand(Command command)
 	buffer[0] = (uint8_t)_param_rbclw_address.get();
 	buffer[1] = static_cast<uint8_t>(command);
 
-	size_t bytes_written = write(_uart_fd, buffer, 2);
+	const ssize_t bytes_written = write(_uart_fd, buffer, sizeof(buffer));
 
-	if (bytes_written < 2) {
-		PX4_ERR("Only wrote %d out of %d bytes", bytes_written, 2);
+	if (bytes_written != static_cast<ssize_t>(sizeof(buffer))) {
+		PX4_ERR("RoboClaw command write failed: %d/%d bytes",
+			static_cast<int>(bytes_written), static_cast<int>(sizeof(buffer)));
 		return ERROR;
 	}
 

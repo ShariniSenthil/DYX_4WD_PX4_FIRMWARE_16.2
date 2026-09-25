@@ -12,26 +12,20 @@ void Ekf::controlWheelEncoderFusion(const imuSample &imu_sample)
 
 	// Wheel aiding is secondary only. Disabling the source, invalid radius, or
 	// loss of the primary horizontal solution stops wheel fusion without any
-	// navigation-state reset. When horizontal aiding is lost, discard wheel
-	// observations up to the current fusion horizon so they cannot be replayed
-	// after GNSS/primary horizontal aiding returns.
-	if ((_params.wenc_ctrl == 0) || !PX4_ISFINITE(_params.wenc_rad) || !(_params.wenc_rad > 0.f)) {
-		stopWheelEncoderFusion();
-		return;
-	}
-
-	if (!isHorizontalAidingActive()) {
+	// navigation-state reset. Reset the observation buffer at the same time so
+	// no pre-loss/pre-disable wheel sample can be reconsidered after recovery.
+	if ((_params.wenc_ctrl == 0)
+	    || !PX4_ISFINITE(_params.wenc_rad)
+	    || !(_params.wenc_rad > 0.f)
+	    || !isHorizontalAidingActive()) {
 		stopWheelEncoderFusion();
 
 		if (_wheel_encoder_buffer != nullptr) {
-			wheelEncoderSample discarded_sample;
-
-			while (_wheel_encoder_buffer->pop_first_older_than(imu_sample.time_us, &discarded_sample)) {}
+			_wheel_encoder_buffer->reset();
 		}
 
 		return;
 	}
-
 	// If no successful wheel update has occurred within the configured timeout,
 	// mark wheel aiding inactive. GNSS/IMU aiding continues unchanged.
 	if (_wheel_encoder_fusion_active && isTimedOut(_aid_src_wheel_encoder.time_last_fuse, timeout_us)) {
