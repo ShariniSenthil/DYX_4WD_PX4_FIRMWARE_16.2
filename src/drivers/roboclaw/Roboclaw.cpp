@@ -42,6 +42,7 @@
  */
 
 #include "Roboclaw.hpp"
+#include <px4_platform_common/events.h>
 #include <termios.h>
 #include <math.h>
 
@@ -245,6 +246,11 @@ void Roboclaw::Run()
 		_parameter_update_sub.copy(&parameter_update);
 
 		updateParams();
+		checkVelocityControlConfig();
+	}
+
+	if (!_vel_ctrl_config_checked) {
+		checkVelocityControlConfig();
 	}
 
 	_actuator_armed_sub.update();
@@ -474,6 +480,24 @@ void Roboclaw::publishEscStatus(bool online)
 	status.esc[1].esc_address = 2;
 
 	_esc_status_pub.publish(status);
+}
+
+void Roboclaw::checkVelocityControlConfig()
+{
+	// RBCLW_VEL_CTRL=1 with RBCLW_QPPS_MAX<=0 commands zero QPPS on every
+	// cycle. Report this explicitly instead of silently leaving the rover immobile.
+	const bool invalid = _param_rbclw_vel_ctrl.get() != 0 && _param_rbclw_qpps_max.get() <= 0;
+
+	if (invalid && (!_vel_ctrl_config_invalid || !_vel_ctrl_config_checked)) {
+		PX4_ERR("RBCLW_VEL_CTRL=1 but RBCLW_QPPS_MAX=%d: wheels will not move",
+			static_cast<int>(_param_rbclw_qpps_max.get()));
+		events::send<int32_t>(events::ID("roboclaw_vel_ctrl_qpps_invalid"), events::Log::Critical,
+				      "RoboClaw velocity control on but RBCLW_QPPS_MAX is {1}: wheels will not move",
+				      _param_rbclw_qpps_max.get());
+	}
+
+	_vel_ctrl_config_invalid = invalid;
+	_vel_ctrl_config_checked = true;
 }
 
 void Roboclaw::markCommunicationFailed(const char *reason)

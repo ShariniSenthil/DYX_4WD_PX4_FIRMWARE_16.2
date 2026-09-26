@@ -134,10 +134,30 @@ void DifferentialRateControl::generateRateAndThrottleSetpoint()
 
 		if ((offboard_rate_control || offboard_speed_yaw_rate_control)
 		    && PX4_ISFINITE(trajectory_setpoint.yawspeed)) {
+			float commanded_yaw_rate = trajectory_setpoint.yawspeed;
+
+			if (offboard_speed_yaw_rate_control) {
+				constexpr float stationary_speed_threshold = 0.01f;
+				const matrix::Vector2f velocity_setpoint(trajectory_setpoint.velocity[0],
+									 trajectory_setpoint.velocity[1]);
+				const bool stationary = velocity_setpoint.isAllFinite()
+							&& velocity_setpoint.norm() < stationary_speed_threshold;
+				const bool trajectory_setpoint_fresh = trajectory_setpoint.timestamp > 0
+								       && _timestamp >= trajectory_setpoint.timestamp
+								       && (_timestamp - trajectory_setpoint.timestamp) < 500_ms;
+
+				// Firmware-3 full-authority safety: if a stationary Jetson
+				// pivot command becomes stale, command zero yaw-rate. Do not
+				// restore PX4 yaw-error steering or the RD_TRANS_* state machine.
+				if (stationary && !trajectory_setpoint_fresh) {
+					commanded_yaw_rate = 0.f;
+				}
+			}
+
 			rover_rate_setpoint_s rover_rate_setpoint{};
 			rover_rate_setpoint.timestamp = _timestamp;
 			rover_rate_setpoint.yaw_rate_setpoint =
-				math::constrain(trajectory_setpoint.yawspeed, -_max_yaw_rate, _max_yaw_rate);
+				math::constrain(commanded_yaw_rate, -_max_yaw_rate, _max_yaw_rate);
 			_rover_rate_setpoint_pub.publish(rover_rate_setpoint);
 		}
 	}

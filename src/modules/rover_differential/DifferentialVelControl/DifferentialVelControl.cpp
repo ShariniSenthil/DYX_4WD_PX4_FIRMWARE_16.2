@@ -222,10 +222,14 @@ void DifferentialVelControl::generateAttitudeAndThrottleSetpoint()
 		}
 	}
 
+	// A zero speed target (stop, stationary pivot, e-stop path) must not be
+	// delayed by RO_DECEL_LIM. Non-zero speed changes remain slew limited.
+	const float decel_limit = fabsf(speed_body_x_setpoint) > FLT_EPSILON ? _param_ro_decel_limit.get() : -1.f;
+
 	rover_throttle_setpoint_s rover_throttle_setpoint{};
 	rover_throttle_setpoint.timestamp = _timestamp;
 	rover_throttle_setpoint.throttle_body_x = RoverControl::speedControl(_speed_setpoint, _pid_speed,
-			speed_body_x_setpoint, _vehicle_speed_body_x, _param_ro_accel_limit.get(), _param_ro_decel_limit.get(),
+			speed_body_x_setpoint, _vehicle_speed_body_x, _param_ro_accel_limit.get(), decel_limit,
 			_param_ro_max_thr_speed.get(), _dt);
 	rover_throttle_setpoint.throttle_body_y = 0.f;
 	_rover_throttle_setpoint_pub.publish(rover_throttle_setpoint);

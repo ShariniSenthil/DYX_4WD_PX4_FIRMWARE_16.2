@@ -126,9 +126,19 @@ void RoverDifferential::generateActuatorSetpoint()
 		_rover_steering_setpoint_sub.copy(&_rover_steering_setpoint);
 	}
 
+	// RO_ACCEL_LIM/RO_DECEL_LIM are already applied to the speed setpoint by
+	// DifferentialVelControl in closed-loop modes. Applying them again here
+	// delays stop commands. Retain actuator-command slew only in full manual.
+	const bool full_manual_mode_enabled = _vehicle_control_mode.flag_control_manual_enabled
+					      && !_vehicle_control_mode.flag_control_position_enabled
+					      && !_vehicle_control_mode.flag_control_attitude_enabled
+					      && !_vehicle_control_mode.flag_control_rates_enabled;
+	const float accel_limit = full_manual_mode_enabled ? _param_ro_accel_limit.get() : -1.f;
+	const float decel_limit = full_manual_mode_enabled ? _param_ro_decel_limit.get() : -1.f;
+
 	const float throttle_body_x = RoverControl::throttleControl(_throttle_body_x_setpoint,
-				      _rover_throttle_setpoint.throttle_body_x, _current_throttle_body_x, _param_ro_accel_limit.get(),
-				      _param_ro_decel_limit.get(), _param_ro_max_thr_speed.get(), _dt);
+				      _rover_throttle_setpoint.throttle_body_x, _current_throttle_body_x, accel_limit,
+				      decel_limit, _param_ro_max_thr_speed.get(), _dt);
 	actuator_motors_s actuator_motors{};
 	actuator_motors.reversible_flags = _param_r_rev.get();
 	computeInverseKinematics(throttle_body_x,
